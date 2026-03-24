@@ -1,0 +1,2 @@
+[console_scripts]
+llm-test-lab = llm_test_lab.cli:main
