@@ -1,40 +1,40 @@
 import time
 from typing import List, Callable
-
-from llm_test_lab_core.models import Scenario, Variant, RunResult, ScenarioResult
+from llm_test_lab_core.judges_ollama import OllamaJudgeClient
+from llm_test_lab_core.models import Scenario, RunResult, ScenarioResult
 
 
 async def run_suite(
     run_id: str,
     project: str,
-    variant: Variant,
+    variant,
     scenarios: List[Scenario],
-    judge,
-    app_call: Callable[[str], str],
+    judge: OllamaJudgeClient,
+    app_call: Callable,
     rubric: str,
 ) -> RunResult:
     results: List[ScenarioResult] = []
 
-    for sc in scenarios:
-        start = time.perf_counter()
-        answer = app_call(sc.question)
-        latency_ms = (time.perf_counter() - start) * 1000
+    for scenario in scenarios:
+        raw_answer = app_call(scenario.question)
 
+        start = time.perf_counter()
         scored = await judge.score(
-            question=sc.question,
-            answer=answer,
-            context_docs=sc.context_docs,
+            question=scenario.question,
+            answer=raw_answer,
+            context_docs=scenario.context_docs,
             rubric=rubric,
         )
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
         results.append(
             ScenarioResult(
-                scenario_id=sc.id,
+                scenario_id=scenario.id,
                 variant_id=variant.id,
-                score=float(scored["score"]),
+                score=scored["score"],
                 reason=scored.get("reason", ""),
                 latency_ms=latency_ms,
-                judge_model=scored.get("judge_model", "unknown"),
+                judge_model=scored.get("judge_model", ""),
             )
         )
 

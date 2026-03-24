@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import List
 import uuid
 
@@ -53,6 +54,7 @@ class RunResponse(BaseModel):
     project: str
     variant_name: str
     model_name: str
+    created_at: str | None = None
     results: List[ScenarioResultOut]
 
 
@@ -62,6 +64,7 @@ def _map_run(run: models.Run) -> RunResponse:
         project=run.project,
         variant_name=run.variant_name,
         model_name=run.model_name,
+        created_at=run.created_at.isoformat() if run.created_at else None,
         results=[
             ScenarioResultOut(
                 scenario_id=r.scenario_id,
@@ -105,6 +108,7 @@ async def run_local_eval(body: RunRequest, db: AsyncSession = Depends(get_db)):
         project=run_result.project,
         variant_name=variant.name,
         model_name=variant.model_name,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(db_run)
 

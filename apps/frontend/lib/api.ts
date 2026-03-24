@@ -13,9 +13,10 @@ export interface Run {
   run_id: string;
   project: string;
   variant_name: string;
-  model_name: string;
   results: ScenarioResult[];
+  created_at?: string;   // add this
 }
+
 
 export async function fetchRuns(): Promise<Run[]> {
   const res = await fetch(`${API_BASE}/api/runs`, { cache: "no-store" });
