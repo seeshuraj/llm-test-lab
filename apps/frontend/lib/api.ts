@@ -1,3 +1,5 @@
+import { authHeaders } from "./auth";
+
 const API_BASE = "http://127.0.0.1:8000";
 
 export interface ScenarioResult {
@@ -13,19 +15,29 @@ export interface Run {
   run_id: string;
   project: string;
   variant_name: string;
+  model_name: string;
+  created_at?: string;
   results: ScenarioResult[];
-  created_at?: string;   // add this
 }
 
-
 export async function fetchRuns(): Promise<Run[]> {
-  const res = await fetch(`${API_BASE}/api/runs`, { cache: "no-store" });
+  const res = await fetch(`${API_BASE}/api/runs`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to fetch runs");
   return res.json();
 }
 
 export async function fetchRun(runId: string): Promise<Run> {
-  const res = await fetch(`${API_BASE}/api/runs/${runId}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("Run not found");
+  const res = await fetch(`${API_BASE}/api/runs/${runId}`, { headers: authHeaders() });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) throw new Error("Failed to fetch run");
   return res.json();
+}
+
+export async function deleteRun(runId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/runs/${runId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to delete run");
 }

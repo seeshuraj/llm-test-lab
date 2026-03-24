@@ -1,33 +1,50 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, Run } from "@/lib/api";
+import { fetchRuns, deleteRun, Run } from "@/lib/api";
+import { getToken, clearToken, authHeaders } from "@/lib/auth";
 
 const API_BASE = "http://127.0.0.1:8000";
 
 export default function HomePage() {
+  const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
 
-  // Form state
   const [project, setProject] = useState("demo-project");
   const [variant, setVariant] = useState("v1");
   const [scenariosPath, setScenariosPath] = useState("E:\\llm-test-lab\\scenarios.yaml");
+  const [appUrl, setAppUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Redirect to login if no token
+  useEffect(() => {
+    if (!getToken()) router.push("/login");
+  }, []);
 
   const loadRuns = () => {
     setLoading(true);
     fetchRuns()
       .then(setRuns)
-      .catch((e) => setError(String(e)))
+      .catch((e) => {
+        if (String(e).includes("UNAUTHORIZED")) {
+          clearToken();
+          router.push("/login");
+        } else {
+          setError(String(e));
+        }
+      })
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { loadRuns(); }, []);
+  useEffect(() => {
+    if (getToken()) loadRuns();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,11 +53,12 @@ export default function HomePage() {
     try {
       const res = await fetch(`${API_BASE}/api/run-local`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           scenarios_path: scenariosPath,
           project,
           variant_name: variant,
+          app_url: appUrl || null,
         }),
       });
       if (!res.ok) {
@@ -56,6 +74,16 @@ export default function HomePage() {
     }
   };
 
+  const handleDelete = async (runId: string) => {
+    if (!confirm("Delete this run? This cannot be undone.")) return;
+    try {
+      await deleteRun(runId);
+      loadRuns();
+    } catch (e) {
+      alert("Failed to delete run");
+    }
+  };
+
   return (
     <main className="max-w-6xl mx-auto p-8">
       {/* Header */}
@@ -64,19 +92,32 @@ export default function HomePage() {
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
           <p className="text-gray-400 mt-1">Evaluation runs</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          + New Run
-        </button>
-        <Link
-          href="/compare"
-          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          ⚖ Compare
-        </Link>
-
+        <div className="flex items-center gap-3">
+          <Link
+            href="/trends"
+            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            📈 Trends
+          </Link>
+          <Link
+            href="/compare"
+            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            ⚖ Compare
+          </Link>
+          <button
+            onClick={() => setShowForm(true)}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            + New Run
+          </button>
+          <button
+            onClick={() => { clearToken(); router.push("/login"); }}
+            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            Sign Out
+          </button>
+        </div>
       </div>
 
       {/* New Run Modal */}
@@ -115,6 +156,21 @@ export default function HomePage() {
                   required
                 />
                 <p className="text-xs text-gray-500 mt-1">Full path to your scenarios.yaml file</p>
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">
+                  App endpoint URL <span className="text-gray-600">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={appUrl}
+                  onChange={(e) => setAppUrl(e.target.value)}
+                  placeholder="http://localhost:5001/ask"
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  POST {`{ question }`} → expects {`{ answer }`} back. Leave blank for echo mode.
+                </p>
               </div>
 
               {formError && (
@@ -181,10 +237,16 @@ export default function HomePage() {
                   <td className="px-4 py-3 text-gray-400 text-xs">
                     {run.created_at ? new Date(run.created_at).toLocaleString() : "—"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 flex items-center gap-3">
                     <Link href={`/runs/${run.run_id}`} className="text-blue-400 hover:underline">
                       View →
                     </Link>
+                    <button
+                      onClick={() => handleDelete(run.run_id)}
+                      className="text-red-500 hover:text-red-400 text-xs transition-colors"
+                    >
+                      🗑 Delete
+                    </button>
                   </td>
                 </tr>
               );

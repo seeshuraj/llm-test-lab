@@ -1,7 +1,8 @@
 import time
-from typing import List, Callable
+from typing import List, Callable, Awaitable, Union
 from llm_test_lab_core.judges_ollama import OllamaJudgeClient
 from llm_test_lab_core.models import Scenario, RunResult, ScenarioResult
+import asyncio
 
 
 async def run_suite(
@@ -16,16 +17,20 @@ async def run_suite(
     results: List[ScenarioResult] = []
 
     for scenario in scenarios:
-        raw_answer = app_call(scenario.question)
-
+        # Support both sync and async app_call
         start = time.perf_counter()
+        if asyncio.iscoroutinefunction(app_call):
+            raw_answer = await app_call(scenario.question)
+        else:
+            raw_answer = app_call(scenario.question)
+        latency_ms = round((time.perf_counter() - start) * 1000, 2)
+
         scored = await judge.score(
             question=scenario.question,
             answer=raw_answer,
             context_docs=scenario.context_docs,
             rubric=rubric,
         )
-        latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
         results.append(
             ScenarioResult(
