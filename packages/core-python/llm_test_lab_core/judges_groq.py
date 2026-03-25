@@ -8,7 +8,7 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
 class GroqJudgeClient:
-    def __init__(self, model: str = "llama3-8b-8192"):
+    def __init__(self, model: str = "llama-3.1-8b-instant"):
         self.model = model
         self.api_key = os.environ.get("GROQ_API_KEY", "")
 
