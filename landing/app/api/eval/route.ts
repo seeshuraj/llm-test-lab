@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { supabase } from "@/lib/supabase";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const groq = new OpenAI({
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: "https://api.groq.com/openai/v1",
+});
 
-async function runModel(model: string, prompt: string) {
+async function runGroq(model: string, prompt: string) {
   const start = Date.now();
-  const res = await openai.chat.completions.create({
+  const res = await groq.chat.completions.create({
     model,
     messages: [{ role: "user", content: prompt }],
     max_tokens: 512,
   });
   const latency = Date.now() - start;
-  const output = res.choices[0].message.content ?? "";
-  return { model, output, latency };
+  return { model, output: res.choices[0].message.content ?? "", latency };
 }
 
 function scoreOutput(output: string, expected: string) {
@@ -25,14 +28,30 @@ function scoreOutput(output: string, expected: string) {
 
 export async function POST(req: NextRequest) {
   const { prompt, expected } = await req.json();
-  const models = ["gpt-4o-mini", "gpt-3.5-turbo"];
 
-  const results = await Promise.all(models.map((m) => runModel(m, prompt)));
+  const [llama70b, llama8b] = await Promise.all([
+    runGroq("llama-3.3-70b-versatile", prompt),
+    runGroq("llama-3.1-8b-instant", prompt),
+  ]);
 
-  const scored = results.map((r) => ({
-    ...r,
+  const results = [llama70b, llama8b].map((r) => ({
+    model: r.model,
+    output: r.output,
+    latency: r.latency,
     score: scoreOutput(r.output, expected),
   }));
 
-  return NextResponse.json({ results: scored });
+  // Save each result to Supabase
+  await supabase.from("eval_runs").insert(
+    results.map((r) => ({
+      prompt,
+      expected,
+      model: r.model,
+      output: r.output,
+      score: r.score,
+      latency: r.latency,
+    }))
+  );
+
+  return NextResponse.json({ results });
 }
