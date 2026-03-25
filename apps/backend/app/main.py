@@ -14,7 +14,7 @@ from sqlalchemy import select
 from .db import engine, Base, get_db
 from . import models
 from llm_test_lab_core.models import Variant
-from llm_test_lab_core.judges_groq import GroqJudgeClient  
+from llm_test_lab_core.judges_groq import GroqJudgeClient
 from llm_test_lab.scenarios_yaml import load_scenarios_from_yaml
 from llm_test_lab.runner_local import run_suite
 from .auth import hash_password, verify_password, create_access_token, get_current_user
@@ -31,12 +31,7 @@ app = FastAPI(title="LLM Test Lab Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://llm-test-lab-psi.vercel.app",
-        "https://*.vercel.app",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
