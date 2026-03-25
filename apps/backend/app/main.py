@@ -156,7 +156,7 @@ async def run_local_eval(
         rag_config={},
     )
 
-    judge = GroqJudgeClient(model="llama3-8b-8192")
+    judge = GroqJudgeClient(model="llama-3.1-8b-instant")
     run_id = str(uuid.uuid4())
 
     if body.app_url:
