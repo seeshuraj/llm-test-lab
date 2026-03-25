@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from .db import engine, Base, get_db
 from . import models
@@ -218,7 +219,11 @@ async def run_local_eval(
 
     await db.commit()
 
-    res = await db.execute(select(models.Run).where(models.Run.id == run_id))
+    res = await db.execute(
+        select(models.Run)
+        .options(selectinload(models.Run.results))
+        .where(models.Run.id == run_id)
+    )
     db_run = res.scalars().first()
     return _map_run(db_run)
 
@@ -230,6 +235,7 @@ async def list_runs(
 ):
     res = await db.execute(
         select(models.Run)
+        .options(selectinload(models.Run.results))
         .where(models.Run.user_id == current_user.id)
         .order_by(models.Run.created_at.desc())
     )
@@ -244,7 +250,9 @@ async def get_run(
     current_user: models.User = Depends(get_current_user),
 ):
     res = await db.execute(
-        select(models.Run).where(
+        select(models.Run)
+        .options(selectinload(models.Run.results))
+        .where(
             models.Run.id == run_id,
             models.Run.user_id == current_user.id,
         )
@@ -262,7 +270,8 @@ async def delete_run(
     current_user: models.User = Depends(get_current_user),
 ):
     res = await db.execute(
-        select(models.Run).where(
+        select(models.Run)
+        .where(
             models.Run.id == run_id,
             models.Run.user_id == current_user.id,
         )
