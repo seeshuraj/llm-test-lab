@@ -15,7 +15,7 @@ from .db import engine, Base, get_db
 from . import models
 from llm_test_lab_core.models import Variant
 from llm_test_lab_core.judges_groq import GroqJudgeClient
-from llm_test_lab.scenarios_yaml import load_scenarios_from_yaml
+from llm_test_lab.scenarios_yaml import load_scenarios_from_string
 from llm_test_lab.runner_local import run_suite
 from .auth import hash_password, verify_password, create_access_token, get_current_user
 
@@ -88,7 +88,7 @@ async def me(current_user: models.User = Depends(get_current_user)):
 # ── Run schemas ───────────────────────────────────────────────────────────────
 
 class RunRequest(BaseModel):
-    scenarios_path: str
+    scenarios_yaml: str
     project: str = "demo-project"
     variant_name: str = "demo-variant"
     app_url: Optional[str] = None
@@ -144,7 +144,10 @@ async def run_local_eval(
     db: AsyncSession = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    scenarios = load_scenarios_from_yaml(body.scenarios_path)
+    try:
+        scenarios = load_scenarios_from_string(body.scenarios_yaml)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid scenarios YAML: {e}")
 
     variant = Variant(
         id=str(uuid.uuid4()),

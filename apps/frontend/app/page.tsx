@@ -17,7 +17,8 @@ export default function HomePage() {
 
   const [project, setProject] = useState("demo-project");
   const [variant, setVariant] = useState("v1");
-  const [scenariosPath, setScenariosPath] = useState("");
+  const [scenariosYaml, setScenariosYaml] = useState("");
+  const [fileName, setFileName] = useState("");
   const [appUrl, setAppUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -45,8 +46,18 @@ export default function HomePage() {
     if (getToken()) loadRuns();
   }, []);
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => setScenariosYaml(ev.target?.result as string);
+    reader.readAsText(file);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!scenariosYaml) { setFormError("Please upload a scenarios.yaml file"); return; }
     setSubmitting(true);
     setFormError(null);
     try {
@@ -54,7 +65,7 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
-          scenarios_path: scenariosPath,
+          scenarios_yaml: scenariosYaml,
           project,
           variant_name: variant,
           app_url: appUrl || null,
@@ -65,6 +76,8 @@ export default function HomePage() {
         throw new Error(err.detail || "Run failed");
       }
       setShowForm(false);
+      setScenariosYaml("");
+      setFileName("");
       loadRuns();
     } catch (e) {
       setFormError(String(e));
@@ -122,10 +135,13 @@ export default function HomePage() {
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Scenarios file path</label>
-                <input type="text" value={scenariosPath} onChange={(e) => setScenariosPath(e.target.value)}
-                  placeholder="/path/to/scenarios.yaml"
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" required />
+                <label className="block text-sm text-gray-400 mb-1">Scenarios file</label>
+                <label className="flex items-center gap-3 cursor-pointer w-full bg-gray-800 border border-gray-600 hover:border-blue-500 rounded-lg px-3 py-2 text-sm transition-colors">
+                  <span className="text-blue-400">📂 Choose file</span>
+                  <span className="text-gray-400 truncate">{fileName || "No file chosen"}</span>
+                  <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
+                </label>
+                <p className="text-xs text-gray-500 mt-1">Upload your scenarios.yaml file</p>
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
@@ -140,7 +156,7 @@ export default function HomePage() {
                   className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium transition-colors">
                   {submitting ? "Running eval..." : "Run Evaluation"}
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setFormError(null); }}
+                <button type="button" onClick={() => { setShowForm(false); setFormError(null); setScenariosYaml(""); setFileName(""); }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg text-sm font-medium transition-colors">
                   Cancel
                 </button>
