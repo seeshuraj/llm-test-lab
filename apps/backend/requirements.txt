@@ -4,7 +4,7 @@ sqlalchemy[asyncio]
 aiosqlite
 httpx
 python-jose[cryptography]
-passlib[bcrypt]
+bcrypt
 python-multipart
 pydantic
 pyyaml
