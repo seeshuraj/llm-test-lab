@@ -14,7 +14,7 @@ from sqlalchemy import select
 from .db import engine, Base, get_db
 from . import models
 from llm_test_lab_core.models import Variant
-from llm_test_lab_core.judges_ollama import OllamaJudgeClient
+from llm_test_lab_core.judges_groq import GroqJudgeClient  
 from llm_test_lab.scenarios_yaml import load_scenarios_from_yaml
 from llm_test_lab.runner_local import run_suite
 from .auth import hash_password, verify_password, create_access_token, get_current_user
@@ -153,7 +153,7 @@ async def run_local_eval(
         rag_config={},
     )
 
-    judge = OllamaJudgeClient(model="llama3")
+    judge = GroqJudgeClient(model="llama3-8b-8192")
     run_id = str(uuid.uuid4())
 
     if body.app_url:
