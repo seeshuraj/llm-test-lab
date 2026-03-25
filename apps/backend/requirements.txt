@@ -8,5 +8,6 @@ passlib[bcrypt]
 python-multipart
 pydantic
 pyyaml
+groq
 -e ../../packages/core-python
 -e ../../packages/sdk-python
