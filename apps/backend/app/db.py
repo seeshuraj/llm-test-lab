@@ -43,6 +43,7 @@ async def _migrate_add_columns():
         ("runs", "scenarios_yaml", "TEXT"),
         ("runs", "rubric", "TEXT"),
         ("runs", "app_endpoint_url", "TEXT"),
+        ("runs", "run_label", "VARCHAR"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in new_columns:
