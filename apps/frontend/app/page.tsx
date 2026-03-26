@@ -39,6 +39,11 @@ Rules:
 const scoreColor = (s: number) =>
   s >= 0.8 ? "#10b981" : s >= 0.5 ? "#f59e0b" : "#ef4444";
 
+// Resolve color: Tailwind class strings become undefined for style prop; hex strings are used directly
+function resolveStatColor(color: string): string {
+  return color.startsWith("#") ? color : "#ffffff";
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -249,15 +254,15 @@ export default function HomePage() {
       {/* Stats */}
       {!loading && runs.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {[{ label: "Total Runs", value: totalRuns, color: "text-white" },
+          {[
+            { label: "Total Runs", value: totalRuns, color: "#ffffff" },
             { label: "Overall Avg Score", value: overallAvg !== null ? overallAvg.toFixed(2) : "—", color: overallAvg !== null ? scoreColor(overallAvg) : "#9ca3af" },
             { label: "Pass Rate (≥0.8)", value: passRate !== null ? `${passRate.toFixed(0)}%` : "—", color: passRate !== null ? scoreColor(passRate / 100) : "#9ca3af" },
-            { label: "Projects", value: projects.length, color: "text-white" },
+            { label: "Projects", value: projects.length, color: "#ffffff" },
           ].map(({ label, value, color }) => (
             <div key={label} className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
               <p className="text-xs text-gray-500 mb-1">{label}</p>
-              <p className="text-3xl font-bold" style={{ color: typeof color === "string" && color.startsWith("#") ? color : undefined }}
-                className={typeof color === "string" && !color.startsWith("#") ? `text-3xl font-bold ${color}` : "text-3xl font-bold"}>
+              <p className="text-3xl font-bold" style={{ color: resolveStatColor(color) }}>
                 {String(value)}
               </p>
             </div>
@@ -319,7 +324,6 @@ export default function HomePage() {
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm text-gray-400">Scenarios YAML</label>
                   <div className="flex items-center gap-2">
-                    {/* Library dropdown */}
                     {savedScenarios.length > 0 && (
                       <select
                         onChange={(e) => { if (e.target.value) handleLoadFromLibrary(e.target.value); e.target.value = ""; }}
@@ -332,7 +336,6 @@ export default function HomePage() {
                         ))}
                       </select>
                     )}
-                    {/* Editor / File toggle */}
                     <div className="flex bg-gray-800 border border-gray-600 rounded-lg p-0.5 text-xs">
                       <button type="button" onClick={() => setYamlMode("editor")}
                         className={`px-3 py-1 rounded-md transition-colors ${yamlMode === "editor" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
@@ -362,7 +365,6 @@ export default function HomePage() {
                   </label>
                 )}
 
-                {/* Save to library */}
                 {scenariosYaml.trim() && (
                   <div className="mt-2">
                     {!showSaveLib ? (
@@ -381,7 +383,6 @@ export default function HomePage() {
                           className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
                       </div>
                     )}
-                    {/* Library management */}
                     {savedScenarios.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {savedScenarios.map((s) => (
@@ -445,7 +446,7 @@ export default function HomePage() {
       ) : runs.length === 0 ? (
         <div className="text-center py-16">
           <p className="text-gray-500 text-lg mb-2">No runs yet.</p>
-          <p className="text-gray-600 text-sm">Click "+ New Run" to run your first evaluation.</p>
+          <p className="text-gray-600 text-sm">Click &quot;+ New Run&quot; to run your first evaluation.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-gray-700">
@@ -481,7 +482,7 @@ export default function HomePage() {
                           <div className="h-full rounded-full" style={{ width: `${avg * 100}%`, backgroundColor: scoreColor(avg) }} />
                         </div>
                         <span className="font-bold text-xs" style={{ color: scoreColor(avg) }}>{avg.toFixed(2)}</span>
- inequality </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
