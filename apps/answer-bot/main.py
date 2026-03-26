@@ -28,8 +28,15 @@ class QuestionRequest(BaseModel):
 
 
 @app.get("/")
+@app.head("/")
 def health():
     return {"status": "ok", "model": GROQ_MODEL}
+
+
+@app.get("/answer")
+def answer_health():
+    """Health probe endpoint — Render checks this with GET."""
+    return {"status": "ok", "model": GROQ_MODEL, "key_set": bool(GROQ_API_KEY)}
 
 
 @app.post("/answer")
