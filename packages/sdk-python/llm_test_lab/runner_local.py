@@ -17,12 +17,15 @@ async def run_suite(
     results: List[ScenarioResult] = []
 
     for scenario in scenarios:
-        # Support both sync and async app_call
+        # Build flat context string from scenario context_docs
+        context_text = "\n\n".join(scenario.context_docs) if scenario.context_docs else ""
+
+        # Time only the app_call (network + LLM round-trip)
         start = time.perf_counter()
         if asyncio.iscoroutinefunction(app_call):
-            raw_answer = await app_call(scenario.question)
+            raw_answer = await app_call(scenario.question, context_text)
         else:
-            raw_answer = app_call(scenario.question)
+            raw_answer = app_call(scenario.question, context_text)
         latency_ms = round((time.perf_counter() - start) * 1000, 2)
 
         scored = await judge.score(

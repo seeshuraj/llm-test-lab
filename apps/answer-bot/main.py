@@ -3,6 +3,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional
 
 app = FastAPI(title="Answer Bot")
 
@@ -17,14 +18,16 @@ GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
-SYSTEM_PROMPT = (
-    "You are a helpful assistant. Answer the user's question clearly and concisely "
-    "using only the information provided. If you don't know, say so."
+BASE_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer the user's question clearly and concisely. "
+    "If context is provided, use it as your sole source of truth. "
+    "If the answer is not in the context, say you don't know."
 )
 
 
 class QuestionRequest(BaseModel):
     question: str
+    context: Optional[str] = None  # scenario context_docs passed from the eval runner
 
 
 @app.get("/")
@@ -35,7 +38,7 @@ def health():
 
 @app.get("/answer")
 def answer_health():
-    """Health probe endpoint — Render checks this with GET."""
+    """Health probe — Render checks this with GET."""
     return {"status": "ok", "model": GROQ_MODEL, "key_set": bool(GROQ_API_KEY)}
 
 
@@ -43,6 +46,15 @@ def answer_health():
 async def answer(body: QuestionRequest):
     if not GROQ_API_KEY:
         return {"answer": f"Echo (no API key): {body.question}"}
+
+    # Inject context into system prompt if provided
+    system_prompt = BASE_SYSTEM_PROMPT
+    if body.context and body.context.strip():
+        system_prompt += (
+            "\n\nYou are given the following CONTEXT. Treat it as the sole source of truth. "
+            "Do not introduce any facts outside of it.\n\n"
+            f"CONTEXT:\n{body.context.strip()}"
+        )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
@@ -54,7 +66,7 @@ async def answer(body: QuestionRequest):
             json={
                 "model": GROQ_MODEL,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": body.question},
                 ],
                 "temperature": 0.2,

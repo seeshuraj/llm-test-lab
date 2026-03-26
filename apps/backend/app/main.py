@@ -134,13 +134,16 @@ async def run_local(
     judge = GroqJudgeClient(model=req.model_name)
 
     if req.app_endpoint_url:
-        async def app_call(question: str) -> str:
+        async def app_call(question: str, context: str = "") -> str:
+            payload = {"question": question}
+            if context:
+                payload["context"] = context  # pass context docs to the app
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(req.app_endpoint_url, json={"question": question})
+                resp = await client.post(req.app_endpoint_url, json=payload)
                 resp.raise_for_status()
                 return resp.json().get("answer", "")
     else:
-        async def app_call(question: str) -> str:
+        async def app_call(question: str, context: str = "") -> str:
             return f"Echo: {question}"
 
     run_id = str(uuid.uuid4())
@@ -252,7 +255,6 @@ async def delete_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Verify ownership
     result = await db.execute(
         select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
     )
@@ -260,7 +262,6 @@ async def delete_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    # Delete child results first, then the run
     await db.execute(delete(RunScenarioResult).where(RunScenarioResult.run_id == run_id))
     await db.execute(delete(Run).where(Run.id == run_id))
     await db.commit()
