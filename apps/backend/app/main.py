@@ -1,10 +1,12 @@
 import os
 import uuid
+import time
 from datetime import datetime, timezone
 from typing import List, Optional
+from collections import defaultdict
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,11 +43,26 @@ DEFAULT_RUBRIC = (
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
-# Only Groq models verified to work with the current API key
 SUPPORTED_MODELS = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
 ]
+
+# ---------------------------------------------------------------------------
+# Per-user rate limiting: max 1 concurrent run + cooldown of 10s between runs
+# ---------------------------------------------------------------------------
+_user_last_run: dict[str, float] = defaultdict(float)
+_user_running: set[str] = set()
+RUN_COOLDOWN_SECONDS = 10
+
+
+def _check_rate_limit(user_id: str):
+    if user_id in _user_running:
+        raise HTTPException(status_code=429, detail="You already have a run in progress. Please wait for it to finish.")
+    since_last = time.monotonic() - _user_last_run[user_id]
+    if since_last < RUN_COOLDOWN_SECONDS:
+        wait = int(RUN_COOLDOWN_SECONDS - since_last) + 1
+        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before starting another run.")
 
 
 @app.on_event("startup")
@@ -61,10 +78,14 @@ class RunLocalRequest(BaseModel):
     project: str
     variant_name: str = "v1"
     model_name: str = "llama-3.1-8b-instant"
-    run_label: Optional[str] = None  # optional human-readable name
+    run_label: Optional[str] = None
     scenarios_yaml: str
     app_endpoint_url: Optional[str] = None
     rubric: Optional[str] = None
+
+
+class RunLabelUpdate(BaseModel):
+    run_label: str
 
 
 class ScenarioResultOut(BaseModel):
@@ -147,6 +168,8 @@ async def run_local(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _check_rate_limit(current_user.id)
+
     if req.model_name not in SUPPORTED_MODELS:
         raise HTTPException(
             status_code=400,
@@ -184,15 +207,20 @@ async def run_local(
     run_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
 
-    run_result = await run_suite(
-        run_id=run_id,
-        project=req.project,
-        variant=variant,
-        scenarios=scenarios,
-        judge=judge,
-        app_call=app_call,
-        rubric=rubric,
-    )
+    _user_running.add(current_user.id)
+    try:
+        run_result = await run_suite(
+            run_id=run_id,
+            project=req.project,
+            variant=variant,
+            scenarios=scenarios,
+            judge=judge,
+            app_call=app_call,
+            rubric=rubric,
+        )
+    finally:
+        _user_running.discard(current_user.id)
+        _user_last_run[current_user.id] = time.monotonic()
 
     db_run = Run(
         id=run_id,
@@ -221,6 +249,25 @@ async def run_local(
 
     await db.commit()
     return await _build_run_out(db_run, run_result.results)
+
+
+@app.patch("/api/runs/{run_id}/label", response_model=RunOut)
+async def update_run_label(
+    run_id: str,
+    body: RunLabelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run.run_label = body.run_label.strip() or None
+    await db.commit()
+    await db.refresh(run)
+    return await _get_run_with_results(run_id, current_user.id, db)
 
 
 @app.post("/api/runs/{run_id}/rerun", response_model=RunOut)

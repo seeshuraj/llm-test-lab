@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, Run } from "@/lib/api";
+import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, updateRunLabel, Run } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
 import {
   listSavedScenarios, saveScenario, deleteScenario, SavedScenario,
@@ -52,6 +52,11 @@ export default function HomePage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [rerunning, setRerunning] = useState<string | null>(null);
+
+  // Inline label editing
+  const [editingLabel, setEditingLabel] = useState<string | null>(null);
+  const [editLabelValue, setEditLabelValue] = useState("");
+  const [savingLabel, setSavingLabel] = useState<string | null>(null);
 
   // Form state
   const [project, setProject] = useState("demo-project");
@@ -171,6 +176,19 @@ export default function HomePage() {
     }
   };
 
+  const handleSaveLabel = async (runId: string) => {
+    setSavingLabel(runId);
+    try {
+      const updated = await updateRunLabel(runId, editLabelValue);
+      setRuns((prev) => prev.map((r) => r.run_id === runId ? { ...r, run_label: updated.run_label } : r));
+      setEditingLabel(null);
+    } catch {
+      alert("Failed to save label");
+    } finally {
+      setSavingLabel(null);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const yaml = scenariosYaml.trim();
@@ -211,7 +229,6 @@ export default function HomePage() {
     catch { alert("Failed to delete run"); }
   };
 
-  // Summary stats
   const totalRuns = runs.length;
   const allScores = runs.flatMap((r) => r.results.map((x) => x.score));
   const overallAvg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null;
@@ -294,16 +311,12 @@ export default function HomePage() {
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-xl font-bold text-white mb-4">New Evaluation Run</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-
-              {/* Run label */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Run label <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={runLabel} onChange={(e) => setRunLabel(e.target.value)}
                   placeholder="e.g. GPT-4 baseline, Tuesday QA test"
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
               </div>
-
-              {/* Project + Variant */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Project name</label>
@@ -316,8 +329,6 @@ export default function HomePage() {
                     className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
                 </div>
               </div>
-
-              {/* Model selector */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Model</label>
                 <select value={modelName} onChange={(e) => setModelName(e.target.value)}
@@ -327,8 +338,6 @@ export default function HomePage() {
                   ))}
                 </select>
               </div>
-
-              {/* Scenario library + YAML input */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm text-gray-400">Scenarios YAML</label>
@@ -357,7 +366,6 @@ export default function HomePage() {
                     </div>
                   </div>
                 </div>
-
                 {yamlMode === "editor" ? (
                   <div className="relative">
                     <textarea value={scenariosYaml} onChange={(e) => setScenariosYaml(e.target.value)}
@@ -373,14 +381,11 @@ export default function HomePage() {
                     <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
                   </label>
                 )}
-
                 {scenariosYaml.trim() && (
                   <div className="mt-2">
                     {!showSaveLib ? (
                       <button type="button" onClick={() => setShowSaveLib(true)}
-                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors">
-                        + Save to library
-                      </button>
+                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors">+ Save to library</button>
                     ) : (
                       <div className="flex items-center gap-2">
                         <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
@@ -406,8 +411,6 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-
-              {/* App endpoint */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={appUrl} onChange={(e) => setAppUrl(e.target.value)}
@@ -415,8 +418,6 @@ export default function HomePage() {
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
                 <p className="text-xs text-gray-500 mt-1">POST {`{ question, context }`} → expects {`{ answer }`}. Leave blank for echo mode.</p>
               </div>
-
-              {/* Custom rubric */}
               <div>
                 <button type="button" onClick={() => setShowRubric(!showRubric)}
                   className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">
@@ -432,11 +433,16 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-
               {formError && <p className="text-red-400 text-sm">{formError}</p>}
               <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={submitting}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium transition-colors">
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
+                  {submitting && (
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                  )}
                   {submitting ? "Running eval..." : "Run Evaluation"}
                 </button>
                 <button type="button" onClick={() => { setShowForm(false); setFormError(null); setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel(""); }}
@@ -482,13 +488,42 @@ export default function HomePage() {
                 const scores = run.results.map((r) => r.score);
                 const avg = run.avg_score;
                 const pass = scores.length ? (scores.filter((s) => s >= 0.8).length / scores.length) * 100 : 0;
+                const isEditing = editingLabel === run.run_id;
                 return (
                   <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
                     <td className="px-4 py-3">
-                      {run.run_label
-                        ? <span className="text-white font-medium text-sm">{run.run_label}</span>
-                        : <span className="font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</span>
-                      }
+                      {isEditing ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editLabelValue}
+                            onChange={(e) => setEditLabelValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleSaveLabel(run.run_id);
+                              if (e.key === "Escape") setEditingLabel(null);
+                            }}
+                            className="bg-gray-800 border border-blue-500 rounded px-2 py-0.5 text-white text-xs w-36 focus:outline-none"
+                          />
+                          <button onClick={() => handleSaveLabel(run.run_id)} disabled={savingLabel === run.run_id}
+                            className="text-green-400 hover:text-green-300 text-xs disabled:opacity-50">
+                            {savingLabel === run.run_id ? "…" : "✓"}
+                          </button>
+                          <button onClick={() => setEditingLabel(null)} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 group">
+                          {run.run_label
+                            ? <span className="text-white font-medium text-sm">{run.run_label}</span>
+                            : <span className="font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</span>
+                          }
+                          <button
+                            onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
+                            className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-300 text-xs transition-opacity ml-1"
+                            title="Rename"
+                          >✏️</button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-white">{run.project}</td>
                     <td className="px-4 py-3 text-gray-300">{run.variant_name}</td>
@@ -512,14 +547,11 @@ export default function HomePage() {
                       <div className="flex items-center gap-3">
                         <Link href={`/runs/${run.run_id}`} className="text-blue-400 hover:underline text-xs">View →</Link>
                         <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
-                          title="Re-run with same YAML + settings"
-                          className="text-xs text-green-400 hover:text-green-300 disabled:opacity-40 transition-colors">
+                          title="Re-run" className="text-xs text-green-400 hover:text-green-300 disabled:opacity-40 transition-colors">
                           {rerunning === run.run_id ? "⏳" : "🔁"}
                         </button>
-                        <button onClick={() => exportRunCSV(run)} title="Export as CSV"
-                          className="text-xs text-gray-400 hover:text-white transition-colors">
-                          ⬇️
-                        </button>
+                        <button onClick={() => exportRunCSV(run)} title="Export CSV"
+                          className="text-xs text-gray-400 hover:text-white transition-colors">⬇️</button>
                         <button onClick={() => handleCopyShareLink(run.run_id)} title="Copy shareable link"
                           className="text-xs text-gray-400 hover:text-white transition-colors">
                           {copied === run.run_id ? "✅" : "🔗"}

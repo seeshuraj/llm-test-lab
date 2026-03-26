@@ -5,7 +5,7 @@ import { fetchRuns, fetchRun, exportRunCSV, Run } from "@/lib/api";
 import Link from "next/link";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell, Legend, RadarChart, Radar,
+  ResponsiveContainer, Legend, RadarChart, Radar,
   PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from "recharts";
 
@@ -18,6 +18,7 @@ function runDisplayName(r: Run) {
 
 export default function ComparePage() {
   const [runs, setRuns] = useState<Run[]>([]);
+  const [runsLoading, setRunsLoading] = useState(true);
   const [runAId, setRunAId] = useState("");
   const [runBId, setRunBId] = useState("");
   const [runA, setRunA] = useState<Run | null>(null);
@@ -26,7 +27,10 @@ export default function ComparePage() {
   const [filter, setFilter] = useState<"all" | "regressions" | "improvements">("all");
 
   useEffect(() => {
-    fetchRuns().then(setRuns).catch(console.error);
+    fetchRuns()
+      .then(setRuns)
+      .catch(console.error)
+      .finally(() => setRunsLoading(false));
   }, []);
 
   const handleCompare = async () => {
@@ -78,7 +82,6 @@ export default function ComparePage() {
       : <span className="text-red-400 font-bold">▼ {diff.toFixed(2)}</span>;
   };
 
-  // Filter rows
   const filteredIds = allScenarioIds.filter((sid) => {
     const a = mapA[sid]?.score;
     const b = mapB[sid]?.score;
@@ -87,14 +90,12 @@ export default function ComparePage() {
     return true;
   });
 
-  // Side-by-side bar chart data
   const barCompareData = allScenarioIds.map((sid) => ({
     id: sid,
     A: mapA[sid]?.score ?? 0,
     B: mapB[sid]?.score ?? 0,
   }));
 
-  // Radar chart — summary dimensions
   const radarData = runA && runB ? [
     { metric: "Avg Score", A: avgA ?? 0, B: avgB ?? 0 },
     { metric: "Pass Rate", A: (passRateA ?? 0) / 100, B: (passRateB ?? 0) / 100 },
@@ -120,38 +121,57 @@ export default function ComparePage() {
         <Link href="/" className="text-blue-400 hover:underline text-sm">← Back to runs</Link>
       </div>
 
-      {/* Selectors */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Run A (baseline)</label>
-          <select value={runAId} onChange={(e) => setRunAId(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-            <option value="">Select a run...</option>
-            {runs.map((r) => (
-              <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
-            ))}
-          </select>
+      {/* Empty state */}
+      {!runsLoading && runs.length < 2 && (
+        <div className="text-center py-20">
+          <p className="text-5xl mb-4">⚖️</p>
+          <p className="text-gray-400 text-lg mb-2">Nothing to compare yet</p>
+          <p className="text-gray-600 text-sm mb-6">You need at least 2 runs to compare. Go run some evaluations first.</p>
+          <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">← Run evaluations</Link>
         </div>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Run B (new)</label>
-          <select value={runBId} onChange={(e) => setRunBId(e.target.value)}
-            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-            <option value="">Select a run...</option>
-            {runs.map((r) => (
-              <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
-            ))}
-          </select>
-        </div>
-      </div>
+      )}
 
-      <button onClick={handleCompare} disabled={!runAId || !runBId || loading}
-        className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors mb-8">
-        {loading ? "Loading..." : "Compare →"}
-      </button>
+      {/* Selectors */}
+      {(runsLoading || runs.length >= 2) && (
+        <>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Run A (baseline)</label>
+              <select value={runAId} onChange={(e) => setRunAId(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                <option value="">Select a run...</option>
+                {runs.map((r) => (
+                  <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-1">Run B (new)</label>
+              <select value={runBId} onChange={(e) => setRunBId(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                <option value="">Select a run...</option>
+                {runs.map((r) => (
+                  <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <button onClick={handleCompare} disabled={!runAId || !runBId || loading}
+            className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg text-sm font-medium transition-colors mb-8 flex items-center gap-2">
+            {loading && (
+              <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+            )}
+            {loading ? "Loading..." : "Compare →"}
+          </button>
+        </>
+      )}
 
       {runA && runB && (
         <>
-          {/* Summary stat cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               { label: "Avg Score A", value: avgA?.toFixed(3) ?? "—", color: scoreColor(avgA ?? 0) },
@@ -166,17 +186,13 @@ export default function ComparePage() {
             ))}
           </div>
 
-          {/* Delta summary + radar */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {/* Delta card */}
             <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-gray-300 mb-4">Overall Delta (B − A)</h2>
               <div className="flex items-center justify-around">
                 <div className="text-center">
                   <p className="text-xs text-gray-500 mb-1">Score</p>
-                  <p className="text-3xl font-bold">
-                    {avgA !== null && avgB !== null ? diffBadge(avgA, avgB) : "—"}
-                  </p>
+                  <p className="text-3xl font-bold">{avgA !== null && avgB !== null ? diffBadge(avgA, avgB) : "—"}</p>
                 </div>
                 <div className="text-center">
                   <p className="text-xs text-gray-500 mb-1">Regressions</p>
@@ -189,7 +205,6 @@ export default function ComparePage() {
               </div>
             </div>
 
-            {/* Radar chart */}
             <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-gray-300 mb-2">Summary Radar</h2>
               <ResponsiveContainer width="100%" height={180}>
@@ -205,7 +220,6 @@ export default function ComparePage() {
             </div>
           </div>
 
-          {/* Side-by-side score bar chart */}
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-6">
             <h2 className="text-sm font-semibold text-gray-300 mb-4">Score per Scenario (A vs B)</h2>
             <ResponsiveContainer width="100%" height={220}>
@@ -221,7 +235,6 @@ export default function ComparePage() {
             </ResponsiveContainer>
           </div>
 
-          {/* Filter + diff table */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-300">Per-Scenario Diff</h2>
             <div className="flex items-center gap-2">
@@ -266,13 +279,12 @@ export default function ComparePage() {
                   );
                 })}
                 {filteredIds.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-500">No scenarios match the current filter.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-6 text-center text-gray-500">No scenarios match this filter.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
 
-          {/* Reasons diff */}
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Judge Reasons Side-by-Side</h2>
           <div className="space-y-3">
             {filteredIds.map((sid) => {

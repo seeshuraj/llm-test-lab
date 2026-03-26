@@ -32,17 +32,20 @@ export default function TrendsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Group runs by project
   const projects = Array.from(new Set(runs.map((r) => r.project)));
 
-  // Build chart data: one point per run, x = created_at, y = avg score
+  // Use run_label if available, else date, else short UUID
+  const getRunLabel = (r: Run) =>
+    r.run_label ||
+    (r.created_at ? new Date(r.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : r.run_id.slice(0, 8));
+
   const chartDataByProject: Record<string, { time: string; score: number; run_id: string }[]> = {};
   for (const project of projects) {
     chartDataByProject[project] = runs
       .filter((r) => r.project === project)
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
       .map((r) => ({
-        time: r.created_at ? new Date(r.created_at).toLocaleTimeString() : r.run_id.slice(0, 8),
+        time: getRunLabel(r),
         score: r.results.length > 0
           ? parseFloat((r.results.reduce((s, x) => s + x.score, 0) / r.results.length).toFixed(4))
           : 0,
@@ -50,11 +53,11 @@ export default function TrendsPage() {
       }));
   }
 
-  // Merge all points into a unified timeline for multi-line chart
   const allTimes = Array.from(
-    new Set(runs
-      .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
-      .map((r) => r.created_at ? new Date(r.created_at).toLocaleTimeString() : r.run_id.slice(0, 8))
+    new Set(
+      runs
+        .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+        .map((r) => getRunLabel(r))
     )
   );
 
@@ -67,7 +70,6 @@ export default function TrendsPage() {
     return point;
   });
 
-  // Stats per project
   const stats = projects.map((project) => {
     const points = chartDataByProject[project];
     const scores = points.map((p) => p.score);
@@ -94,7 +96,6 @@ export default function TrendsPage() {
 
   return (
     <main className="max-w-6xl mx-auto p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">Score Trends</h1>
@@ -104,27 +105,31 @@ export default function TrendsPage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400">Loading...</p>
+        <div className="space-y-4">
+          <div className="h-8 w-48 bg-gray-800 rounded animate-pulse" />
+          <div className="h-80 bg-gray-800 rounded-xl animate-pulse" />
+          <div className="grid grid-cols-3 gap-4">
+            {[...Array(3)].map((_, i) => <div key={i} className="h-28 bg-gray-800 rounded-xl animate-pulse" />)}
+          </div>
+        </div>
       ) : runs.length < 2 ? (
-        <p className="text-gray-500">Run at least 2 evaluations to see trends.</p>
+        <div className="text-center py-20">
+          <p className="text-gray-500 text-lg mb-2">Not enough data yet.</p>
+          <p className="text-gray-600 text-sm">Run at least 2 evaluations to see trends.</p>
+          <Link href="/" className="inline-block mt-4 text-blue-400 hover:underline text-sm">← Go run some evals</Link>
+        </div>
       ) : (
         <>
-          {/* Threshold control */}
           <div className="flex items-center gap-4 mb-6">
             <label className="text-sm text-gray-400">Quality threshold:</label>
             <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={threshold}
+              type="number" min={0} max={1} step={0.05} value={threshold}
               onChange={(e) => setThreshold(parseFloat(e.target.value))}
               className="bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm w-24 focus:outline-none focus:border-blue-500"
             />
             <span className="text-xs text-gray-500">Red line = minimum acceptable score</span>
           </div>
 
-          {/* Chart */}
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-8">
             <ResponsiveContainer width="100%" height={350}>
               <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
@@ -133,29 +138,18 @@ export default function TrendsPage() {
                 <YAxis domain={[0, 1]} stroke="#6b7280" tick={{ fontSize: 11 }} tickFormatter={(v) => v.toFixed(1)} />
                 <Tooltip content={<CustomTooltip />} />
                 <Legend wrapperStyle={{ color: "#9ca3af", fontSize: 12 }} />
-                <ReferenceLine
-                  y={threshold}
-                  stroke="#ef4444"
-                  strokeDasharray="6 3"
-                  label={{ value: `threshold ${threshold}`, fill: "#ef4444", fontSize: 11 }}
-                />
+                <ReferenceLine y={threshold} stroke="#ef4444" strokeDasharray="6 3"
+                  label={{ value: `threshold ${threshold}`, fill: "#ef4444", fontSize: 11 }} />
                 {projects.map((project, i) => (
-                  <Line
-                    key={project}
-                    type="monotone"
-                    dataKey={project}
-                    stroke={COLORS[i % COLORS.length]}
-                    strokeWidth={2}
+                  <Line key={project} type="monotone" dataKey={project}
+                    stroke={COLORS[i % COLORS.length]} strokeWidth={2}
                     dot={{ r: 4, fill: COLORS[i % COLORS.length] }}
-                    activeDot={{ r: 6 }}
-                    connectNulls
-                  />
+                    activeDot={{ r: 6 }} connectNulls />
                 ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          {/* Stats cards per project */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {stats.map((s, i) => (
               <div key={s.project} className="bg-gray-900 border border-gray-700 rounded-xl p-4">
@@ -166,9 +160,7 @@ export default function TrendsPage() {
                 <div className="grid grid-cols-3 gap-2 text-center">
                   <div>
                     <p className="text-xs text-gray-500">Latest</p>
-                    <p className={`font-bold text-lg ${s.latest >= threshold ? "text-green-400" : "text-red-400"}`}>
-                      {s.latest.toFixed(2)}
-                    </p>
+                    <p className={`font-bold text-lg ${s.latest >= threshold ? "text-green-400" : "text-red-400"}`}>{s.latest.toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-xs text-gray-500">Trend</p>

@@ -53,6 +53,16 @@ export async function deleteRun(runId: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete run");
 }
 
+export async function updateRunLabel(runId: string, label: string): Promise<Run> {
+  const res = await fetch(`${API_BASE}/api/runs/${runId}/label`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ run_label: label }),
+  });
+  if (!res.ok) throw new Error("Failed to update label");
+  return res.json();
+}
+
 export async function rerunRun(runId: string): Promise<Run> {
   const res = await fetch(`${API_BASE}/api/runs/${runId}/rerun`, {
     method: "POST",
@@ -82,7 +92,7 @@ export function exportRunCSV(run: Run): void {
     r.score.toFixed(4),
     r.latency_ms.toFixed(0),
     r.judge_model,
-    `"${r.reason.replace(/"/g, '""')}"`  // escape quotes in reason
+    `"${r.reason.replace(/"/g, '""')}"`
   ]);
   const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
