@@ -5,8 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { fetchRuns, deleteRun, Run } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+const scoreColor = (s: number) =>
+  s >= 0.8 ? "#10b981" : s >= 0.5 ? "#f59e0b" : "#ef4444";
 
 export default function HomePage() {
   const router = useRouter();
@@ -96,29 +102,90 @@ export default function HomePage() {
     }
   };
 
+  // --- Summary stats ---
+  const totalRuns = runs.length;
+  const allScores = runs.flatMap((r) => r.results.map((x) => x.score));
+  const overallAvg = allScores.length
+    ? allScores.reduce((a, b) => a + b, 0) / allScores.length
+    : null;
+  const passRate = allScores.length
+    ? (allScores.filter((s) => s >= 0.8).length / allScores.length) * 100
+    : null;
+  const projects = Array.from(new Set(runs.map((r) => r.project)));
+
+  // Sparkline: last 10 runs sorted by time, avg score
+  const sparkData = [...runs]
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+    .slice(-10)
+    .map((r) => ({
+      t: r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6),
+      avg: r.results.length
+        ? parseFloat((r.results.reduce((a, x) => a + x.score, 0) / r.results.length).toFixed(3))
+        : 0,
+    }));
+
   return (
     <main className="max-w-6xl mx-auto p-8">
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
-          <p className="text-gray-400 mt-1">Evaluation runs</p>
+          <p className="text-gray-400 mt-1">Evaluation dashboard</p>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/trends" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            📈 Trends
-          </Link>
-          <Link href="/compare" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            ⚖ Compare
-          </Link>
-          <button onClick={() => setShowForm(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            + New Run
-          </button>
-          <button onClick={() => { clearToken(); router.push("/login"); }} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            Sign Out
-          </button>
+          <Link href="/trends" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">📈 Trends</Link>
+          <Link href="/compare" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">⚖ Compare</Link>
+          <button onClick={() => setShowForm(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">+ New Run</button>
+          <button onClick={() => { clearToken(); router.push("/login"); }} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Sign Out</button>
         </div>
       </div>
 
+      {/* Summary stat cards */}
+      {!loading && runs.length > 0 && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
+            <p className="text-xs text-gray-500 mb-1">Total Runs</p>
+            <p className="text-3xl font-bold text-white">{totalRuns}</p>
+          </div>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
+            <p className="text-xs text-gray-500 mb-1">Overall Avg Score</p>
+            <p className="text-3xl font-bold" style={{ color: overallAvg !== null ? scoreColor(overallAvg) : "#9ca3af" }}>
+              {overallAvg !== null ? overallAvg.toFixed(2) : "—"}
+            </p>
+          </div>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
+            <p className="text-xs text-gray-500 mb-1">Pass Rate (≥0.8)</p>
+            <p className="text-3xl font-bold" style={{ color: passRate !== null ? scoreColor(passRate / 100) : "#9ca3af" }}>
+              {passRate !== null ? `${passRate.toFixed(0)}%` : "—"}
+            </p>
+          </div>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
+            <p className="text-xs text-gray-500 mb-1">Projects</p>
+            <p className="text-3xl font-bold text-white">{projects.length}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Score sparkline */}
+      {!loading && sparkData.length >= 2 && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
+          <h2 className="text-sm font-semibold text-gray-300 mb-3">Recent Score Trend (last {sparkData.length} runs)</h2>
+          <ResponsiveContainer width="100%" height={120}>
+            <LineChart data={sparkData} margin={{ top: 5, right: 20, left: -30, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="t" tick={{ fontSize: 10, fill: "#6b7280" }} />
+              <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => v.toFixed(1)} />
+              <Tooltip
+                contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                formatter={(v: any) => [Number(v).toFixed(3), "Avg Score"]}
+              />
+              <Line type="monotone" dataKey="avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: "#3b82f6" }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* New Run modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md">
@@ -141,14 +208,12 @@ export default function HomePage() {
                   <span className="text-gray-400 truncate">{fileName || "No file chosen"}</span>
                   <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
                 </label>
-                <p className="text-xs text-gray-500 mt-1">Upload your scenarios.yaml file</p>
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={appUrl} onChange={(e) => setAppUrl(e.target.value)}
                   placeholder="https://your-app.com/ask"
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
-                <p className="text-xs text-gray-500 mt-1">POST {`{ question }`} → expects {`{ answer }`} back. Leave blank for echo mode.</p>
               </div>
               {formError && <p className="text-red-400 text-sm">{formError}</p>}
               <div className="flex gap-3 pt-2">
@@ -166,53 +231,76 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Runs table */}
       {loading ? (
         <p className="text-gray-400">Loading runs...</p>
       ) : error ? (
         <p className="text-red-400">Failed to connect: {error}</p>
       ) : runs.length === 0 ? (
-        <p className="text-gray-500">No runs yet. Click "+ New Run" to create one.</p>
+        <div className="text-center py-16">
+          <p className="text-gray-500 text-lg mb-2">No runs yet.</p>
+          <p className="text-gray-600 text-sm">Click "+ New Run" to run your first evaluation.</p>
+        </div>
       ) : (
-        <table className="w-full text-sm text-left border border-gray-700 rounded-lg overflow-hidden">
-          <thead className="bg-gray-800 text-gray-300">
-            <tr>
-              <th className="px-4 py-3">Run ID</th>
-              <th className="px-4 py-3">Project</th>
-              <th className="px-4 py-3">Variant</th>
-              <th className="px-4 py-3">Scenarios</th>
-              <th className="px-4 py-3">Avg Score</th>
-              <th className="px-4 py-3">Created</th>
-              <th className="px-4 py-3">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {runs.map((run, i) => {
-              const avg = run.results.length > 0
-                ? (run.results.reduce((s, r) => s + r.score, 0) / run.results.length).toFixed(2)
-                : "—";
-              return (
-                <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}...</td>
-                  <td className="px-4 py-3 text-white">{run.project}</td>
-                  <td className="px-4 py-3 text-gray-300">{run.variant_name}</td>
-                  <td className="px-4 py-3 text-gray-300">{run.results.length}</td>
-                  <td className="px-4 py-3">
-                    <span className={`font-bold ${parseFloat(avg) >= 0.8 ? "text-green-400" : parseFloat(avg) >= 0.5 ? "text-yellow-400" : "text-red-400"}`}>
-                      {avg}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">
-                    {run.created_at ? new Date(run.created_at).toLocaleString() : "—"}
-                  </td>
-                  <td className="px-4 py-3 flex items-center gap-3">
-                    <Link href={`/runs/${run.run_id}`} className="text-blue-400 hover:underline">View →</Link>
-                    <button onClick={() => handleDelete(run.run_id)} className="text-red-500 hover:text-red-400 text-xs transition-colors">🗑 Delete</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto rounded-xl border border-gray-700">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-800 text-gray-300">
+              <tr>
+                <th className="px-4 py-3">Run ID</th>
+                <th className="px-4 py-3">Project</th>
+                <th className="px-4 py-3">Variant</th>
+                <th className="px-4 py-3">Scenarios</th>
+                <th className="px-4 py-3">Avg Score</th>
+                <th className="px-4 py-3">Pass Rate</th>
+                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run, i) => {
+                const scores = run.results.map((r) => r.score);
+                const avg = scores.length
+                  ? scores.reduce((a, b) => a + b, 0) / scores.length
+                  : 0;
+                const pass = scores.length
+                  ? (scores.filter((s) => s >= 0.8).length / scores.length) * 100
+                  : 0;
+                return (
+                  <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</td>
+                    <td className="px-4 py-3 text-white">{run.project}</td>
+                    <td className="px-4 py-3 text-gray-300">{run.variant_name}</td>
+                    <td className="px-4 py-3 text-gray-300">{run.results.length}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${avg * 100}%`, backgroundColor: scoreColor(avg) }} />
+                        </div>
+                        <span className="font-bold text-xs" style={{ color: scoreColor(avg) }}>{avg.toFixed(2)}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        pass >= 80 ? "bg-green-900 text-green-300" :
+                        pass >= 50 ? "bg-yellow-900 text-yellow-300" :
+                        "bg-red-900 text-red-300"
+                      }`}>{pass.toFixed(0)}%</span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">
+                      {run.created_at ? new Date(run.created_at).toLocaleString() : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Link href={`/runs/${run.run_id}`} className="text-blue-400 hover:underline text-xs">View →</Link>
+                        <button onClick={() => handleDelete(run.run_id)} className="text-red-500 hover:text-red-400 text-xs transition-colors">🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </main>
   );
