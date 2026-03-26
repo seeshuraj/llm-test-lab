@@ -41,12 +41,10 @@ DEFAULT_RUBRIC = (
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
+# Only Groq models verified to work with the current API key
 SUPPORTED_MODELS = [
     "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
-    "llama3-70b-8192",
-    "mixtral-8x7b-32768",
-    "gemma2-9b-it",
 ]
 
 
@@ -146,6 +144,12 @@ async def run_local(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if req.model_name not in SUPPORTED_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model '{req.model_name}'. Supported: {SUPPORTED_MODELS}"
+        )
+
     try:
         scenarios = load_scenarios_from_string(req.scenarios_yaml)
     except Exception as e:
@@ -231,10 +235,13 @@ async def rerun(
     if not original.scenarios_yaml:
         raise HTTPException(status_code=400, detail="Original run has no stored YAML — cannot re-run")
 
+    # If original model is no longer supported, fall back to default
+    model = original.model_name if original.model_name in SUPPORTED_MODELS else SUPPORTED_MODELS[0]
+
     req = RunLocalRequest(
         project=original.project,
         variant_name=original.variant_name,
-        model_name=original.model_name,
+        model_name=model,
         scenarios_yaml=original.scenarios_yaml,
         rubric=original.rubric,
         app_endpoint_url=original.app_endpoint_url,
