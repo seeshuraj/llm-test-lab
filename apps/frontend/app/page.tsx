@@ -74,7 +74,7 @@ export default function HomePage() {
           scenarios_yaml: scenariosYaml,
           project,
           variant_name: variant,
-          app_url: appUrl || null,
+          app_endpoint_url: appUrl || null,  // matches backend RunLocalRequest
         }),
       });
       if (!res.ok) {
@@ -113,7 +113,6 @@ export default function HomePage() {
     : null;
   const projects = Array.from(new Set(runs.map((r) => r.project)));
 
-  // Sparkline: last 10 runs sorted by time, avg score
   const sparkData = [...runs]
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .slice(-10)
@@ -126,7 +125,6 @@ export default function HomePage() {
 
   return (
     <main className="max-w-6xl mx-auto p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
@@ -140,7 +138,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Summary stat cards */}
       {!loading && runs.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
@@ -166,7 +163,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Score sparkline */}
       {!loading && sparkData.length >= 2 && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Recent Score Trend (last {sparkData.length} runs)</h2>
@@ -185,7 +181,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* New Run modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-md">
@@ -210,10 +205,15 @@ export default function HomePage() {
                 </label>
               </div>
               <div>
-                <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
+                <label className="block text-sm text-gray-400 mb-1">
+                  App endpoint URL <span className="text-gray-600">(optional)</span>
+                </label>
                 <input type="text" value={appUrl} onChange={(e) => setAppUrl(e.target.value)}
-                  placeholder="https://your-app.com/ask"
+                  placeholder="https://your-app.com/answer"
                   className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
+                <p className="text-xs text-gray-500 mt-1">
+                  POST {`{ question }`} → expects {`{ answer }`}. Leave blank for echo mode.
+                </p>
               </div>
               {formError && <p className="text-red-400 text-sm">{formError}</p>}
               <div className="flex gap-3 pt-2">
@@ -231,7 +231,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Runs table */}
       {loading ? (
         <p className="text-gray-400">Loading runs...</p>
       ) : error ? (
