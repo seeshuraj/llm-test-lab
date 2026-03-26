@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { fetchRuns, deleteRun, Run } from "@/lib/api";
@@ -10,6 +10,7 @@ import {
 } from "recharts";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 const SAMPLE_YAML = `scenarios:
   - id: my-first-test
@@ -33,6 +34,8 @@ export default function HomePage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showForm, setShowForm] = useState(false);
 
   const [project, setProject] = useState("demo-project");
@@ -45,14 +48,42 @@ export default function HomePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (!getToken()) router.push("/login");
   }, []);
 
-  const loadRuns = () => {
+  // Silent background refresh — no full loading spinner
+  const silentRefresh = useCallback(() => {
+    if (!getToken()) return;
+    setRefreshing(true);
+    fetchRuns()
+      .then((data) => {
+        setRuns(data);
+        setLastUpdated(new Date());
+        setError(null);
+      })
+      .catch((e) => {
+        if (String(e).includes("UNAUTHORIZED")) {
+          clearToken();
+          router.push("/login");
+        }
+        // silently ignore other errors during background refresh
+      })
+      .finally(() => setRefreshing(false));
+  }, []);
+
+  // Initial load — shows full loading state
+  const loadRuns = useCallback(() => {
+    if (!getToken()) return;
     setLoading(true);
     fetchRuns()
-      .then(setRuns)
+      .then((data) => {
+        setRuns(data);
+        setLastUpdated(new Date());
+        setError(null);
+      })
       .catch((e) => {
         if (String(e).includes("UNAUTHORIZED")) {
           clearToken();
@@ -62,10 +93,27 @@ export default function HomePage() {
         }
       })
       .finally(() => setLoading(false));
-  };
+  }, []);
 
+  // On mount: initial load + start polling
   useEffect(() => {
-    if (getToken()) loadRuns();
+    if (!getToken()) return;
+    loadRuns();
+    intervalRef.current = setInterval(silentRefresh, POLL_INTERVAL_MS);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
+
+  // Refresh on tab focus
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && getToken()) {
+        silentRefresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,11 +199,28 @@ export default function HomePage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
-          <p className="text-gray-400 mt-1">Evaluation dashboard</p>
+          <div className="flex items-center gap-3 mt-1">
+            <p className="text-gray-400 text-sm">Evaluation dashboard</p>
+            {lastUpdated && (
+              <span className="flex items-center gap-1.5 text-xs text-gray-600">
+                {refreshing
+                  ? <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                  : <span className="inline-block w-2 h-2 rounded-full bg-green-500" />}
+                {refreshing ? "Refreshing…" : `Updated ${lastUpdated.toLocaleTimeString()}`}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/trends" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">📈 Trends</Link>
           <Link href="/compare" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">⚖ Compare</Link>
+          <button
+            onClick={() => silentRefresh()}
+            title="Refresh now"
+            className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            {refreshing ? "⟳" : "↻"}
+          </button>
           <button onClick={() => { setShowForm(true); setScenariosYaml(SAMPLE_YAML); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">+ New Run</button>
           <button onClick={() => { clearToken(); router.push("/login"); }} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Sign Out</button>
         </div>
