@@ -4,10 +4,11 @@ from pydantic import BaseModel, ConfigDict
 
 class Scenario(BaseModel):
     id: str
-    name: str
+    name: Optional[str] = None      # optional — defaults to id if not provided
     question: str
     context_docs: List[str] = []
     expected_answer: Optional[str] = None
+    expected_keywords: List[str] = []  # used in YAML but not required
     tags: List[str] = []
 
 
