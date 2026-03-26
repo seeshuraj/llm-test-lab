@@ -1,8 +1,11 @@
 import os
+import logging
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
 from typing import AsyncGenerator
 from .models import Base
+
+logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
@@ -47,13 +50,30 @@ async def _migrate_add_columns():
     ]
     async with engine.begin() as conn:
         for table, column, col_type in new_columns:
+            if is_postgres:
+                # Postgres: use DO block with IF NOT EXISTS check — fully idempotent
+                sql = f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name='{table}' AND column_name='{column}'
+                    ) THEN
+                        ALTER TABLE {table} ADD COLUMN {column} {col_type};
+                        RAISE NOTICE 'Added column {column} to {table}';
+                    END IF;
+                END$$;
+                """
+            else:
+                # SQLite does not support IF NOT EXISTS on ALTER TABLE
+                sql = f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+
             try:
-                await conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-                )
-            except Exception:
-                # Column already exists — safe to ignore
-                pass
+                await conn.execute(text(sql))
+                logger.info("Migration OK: %s.%s", table, column)
+            except Exception as e:
+                # SQLite will raise if column already exists — safe to ignore
+                logger.warning("Migration skipped %s.%s: %s", table, column, e)
 
 
 async def init_db():
