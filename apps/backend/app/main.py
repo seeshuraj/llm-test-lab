@@ -8,7 +8,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from .auth import router as auth_router, get_current_user
 from .db import get_db, init_db
@@ -72,6 +72,42 @@ class RunOut(BaseModel):
     created_at: Optional[datetime]
     avg_score: float
     results: List[ScenarioResultOut]
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> RunOut:
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == user_id)
+    )
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    res_result = await db.execute(
+        select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
+    )
+    results = res_result.scalars().all()
+    avg = sum(r.score for r in results) / len(results) if results else 0.0
+
+    return RunOut(
+        run_id=run.id,
+        project=run.project,
+        variant_name=run.variant_name,
+        model_name=run.model_name,
+        created_at=run.created_at,
+        avg_score=round(avg, 4),
+        results=[ScenarioResultOut(
+            scenario_id=r.scenario_id,
+            variant_id=r.variant_id,
+            score=r.score,
+            reason=r.reason,
+            latency_ms=r.latency_ms,
+            judge_model=r.judge_model,
+        ) for r in results],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +235,35 @@ async def list_runs(
             ) for r in results],
         ))
     return out
+
+
+@app.get("/api/runs/{run_id}", response_model=RunOut)
+async def get_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await _get_run_with_results(run_id, current_user.id, db)
+
+
+@app.delete("/api/runs/{run_id}", status_code=204)
+async def delete_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Verify ownership
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    # Delete child results first, then the run
+    await db.execute(delete(RunScenarioResult).where(RunScenarioResult.run_id == run_id))
+    await db.execute(delete(Run).where(Run.id == run_id))
+    await db.commit()
 
 
 @app.get("/health")
