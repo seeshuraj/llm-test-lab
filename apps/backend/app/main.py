@@ -32,9 +32,13 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth")
 
 DEFAULT_RUBRIC = (
-    "Score the answer based on correctness, relevance to the question, "
-    "and grounding in the provided context documents. "
-    "Penalise hallucinations or answers that contradict the context."
+    "Score the answer based on correctness and grounding in the provided context. "
+    "Rules: "
+    "(1) If the context contains relevant information, the answer must use it accurately — score high for correct grounding, low for contradictions or hallucinations. "
+    "(2) If the context does NOT contain relevant information for the question, a correct refusal such as "
+    "'I don't know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
+    "(3) If the context is irrelevant but the model answers correctly from general knowledge, score 0.3–0.5 — the answer may be factually right but it is not grounded. "
+    "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
 
