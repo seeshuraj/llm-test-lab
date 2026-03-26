@@ -17,7 +17,7 @@ export interface Run {
   variant_name: string;
   model_name: string;
   created_at?: string;
-  avg_score: number;   // pre-computed by backend, use this directly
+  avg_score: number;   // pre-computed by backend
   results: ScenarioResult[];
 }
 
@@ -32,6 +32,12 @@ export async function fetchRun(runId: string): Promise<Run> {
   const res = await fetch(`${API_BASE}/api/runs/${runId}`, { headers: authHeaders() });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error("Failed to fetch run");
+  return res.json();
+}
+
+export async function fetchSharedRun(runId: string): Promise<Run> {
+  const res = await fetch(`${API_BASE}/api/share/${runId}`);
+  if (!res.ok) throw new Error("Run not found");
   return res.json();
 }
 

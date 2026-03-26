@@ -137,7 +137,7 @@ async def run_local(
         async def app_call(question: str, context: str = "") -> str:
             payload = {"question": question}
             if context:
-                payload["context"] = context  # pass context docs to the app
+                payload["context"] = context
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(req.app_endpoint_url, json=payload)
                 resp.raise_for_status()
@@ -265,6 +265,45 @@ async def delete_run(
     await db.execute(delete(RunScenarioResult).where(RunScenarioResult.run_id == run_id))
     await db.execute(delete(Run).where(Run.id == run_id))
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Public share route — NO auth required
+# ---------------------------------------------------------------------------
+
+@app.get("/api/share/{run_id}", response_model=RunOut)
+async def get_shared_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Public read-only endpoint — returns run data without requiring authentication."""
+    result = await db.execute(select(Run).where(Run.id == run_id))
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    res_result = await db.execute(
+        select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
+    )
+    results = res_result.scalars().all()
+    avg = sum(r.score for r in results) / len(results) if results else 0.0
+
+    return RunOut(
+        run_id=run.id,
+        project=run.project,
+        variant_name=run.variant_name,
+        model_name=run.model_name,
+        created_at=run.created_at,
+        avg_score=round(avg, 4),
+        results=[ScenarioResultOut(
+            scenario_id=r.scenario_id,
+            variant_id=r.variant_id,
+            score=r.score,
+            reason=r.reason,
+            latency_ms=r.latency_ms,
+            judge_model=r.judge_model,
+        ) for r in results],
+    )
 
 
 @app.get("/health")
