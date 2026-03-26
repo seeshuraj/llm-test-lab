@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey
+from sqlalchemy import String, Float, DateTime, ForeignKey, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from typing import Optional
 
 
 class Base(DeclarativeBase):
@@ -32,6 +33,9 @@ class Run(Base):
         DateTime(timezone=True), nullable=True
     )
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    scenarios_yaml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rubric: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    app_endpoint_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     user: Mapped["User"] = relationship("User", back_populates="runs")
     results: Mapped[list["RunScenarioResult"]] = relationship(

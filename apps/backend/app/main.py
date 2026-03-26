@@ -41,6 +41,14 @@ DEFAULT_RUBRIC = (
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
+SUPPORTED_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+    "llama3-70b-8192",
+    "mixtral-8x7b-32768",
+    "gemma2-9b-it",
+]
+
 
 @app.on_event("startup")
 async def on_startup():
@@ -57,6 +65,7 @@ class RunLocalRequest(BaseModel):
     model_name: str = "llama-3.1-8b-instant"
     scenarios_yaml: str
     app_endpoint_url: Optional[str] = None
+    rubric: Optional[str] = None  # falls back to DEFAULT_RUBRIC if omitted
 
 
 class ScenarioResultOut(BaseModel):
@@ -76,26 +85,17 @@ class RunOut(BaseModel):
     created_at: Optional[datetime]
     avg_score: float
     results: List[ScenarioResultOut]
+    scenarios_yaml: Optional[str] = None
+    rubric: Optional[str] = None
+    app_endpoint_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> RunOut:
-    result = await db.execute(
-        select(Run).where(Run.id == run_id, Run.user_id == user_id)
-    )
-    run = result.scalars().first()
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-
-    res_result = await db.execute(
-        select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
-    )
-    results = res_result.scalars().all()
+async def _build_run_out(run: Run, results: list) -> RunOut:
     avg = sum(r.score for r in results) / len(results) if results else 0.0
-
     return RunOut(
         run_id=run.id,
         project=run.project,
@@ -103,6 +103,9 @@ async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> 
         model_name=run.model_name,
         created_at=run.created_at,
         avg_score=round(avg, 4),
+        scenarios_yaml=run.scenarios_yaml,
+        rubric=run.rubric,
+        app_endpoint_url=run.app_endpoint_url,
         results=[ScenarioResultOut(
             scenario_id=r.scenario_id,
             variant_id=r.variant_id,
@@ -114,9 +117,28 @@ async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> 
     )
 
 
+async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> RunOut:
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == user_id)
+    )
+    run = result.scalars().first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    res_result = await db.execute(
+        select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
+    )
+    results = res_result.scalars().all()
+    return await _build_run_out(run, results)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.get("/api/models")
+def list_models():
+    return {"models": SUPPORTED_MODELS}
+
 
 @app.post("/api/run-local", response_model=RunOut)
 async def run_local(
@@ -128,6 +150,8 @@ async def run_local(
         scenarios = load_scenarios_from_string(req.scenarios_yaml)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid scenarios YAML: {e}")
+
+    rubric = req.rubric.strip() if req.rubric and req.rubric.strip() else DEFAULT_RUBRIC
 
     variant = Variant(
         id=req.variant_name,
@@ -160,7 +184,7 @@ async def run_local(
         scenarios=scenarios,
         judge=judge,
         app_call=app_call,
-        rubric=DEFAULT_RUBRIC,
+        rubric=rubric,
     )
 
     db_run = Run(
@@ -170,6 +194,9 @@ async def run_local(
         model_name=variant.model_name,
         created_at=created_at,
         user_id=current_user.id,
+        scenarios_yaml=req.scenarios_yaml,
+        rubric=rubric,
+        app_endpoint_url=req.app_endpoint_url,
     )
     db.add(db_run)
 
@@ -185,25 +212,34 @@ async def run_local(
         ))
 
     await db.commit()
+    return await _build_run_out(db_run, run_result.results)
 
-    avg = sum(r.score for r in run_result.results) / len(run_result.results) if run_result.results else 0.0
 
-    return RunOut(
-        run_id=run_id,
-        project=req.project,
-        variant_name=variant.name,
-        model_name=variant.model_name,
-        created_at=created_at,
-        avg_score=round(avg, 4),
-        results=[ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-        ) for r in run_result.results],
+@app.post("/api/runs/{run_id}/rerun", response_model=RunOut)
+async def rerun(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replay an existing run with the same YAML, rubric, model, and endpoint."""
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
     )
+    original = result.scalars().first()
+    if not original:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not original.scenarios_yaml:
+        raise HTTPException(status_code=400, detail="Original run has no stored YAML — cannot re-run")
+
+    req = RunLocalRequest(
+        project=original.project,
+        variant_name=original.variant_name,
+        model_name=original.model_name,
+        scenarios_yaml=original.scenarios_yaml,
+        rubric=original.rubric,
+        app_endpoint_url=original.app_endpoint_url,
+    )
+    return await run_local(req, db, current_user)
 
 
 @app.get("/api/runs", response_model=List[RunOut])
@@ -217,30 +253,13 @@ async def list_runs(
         .order_by(Run.created_at.desc())
     )
     runs = result.scalars().all()
-
     out = []
     for run in runs:
         res_result = await db.execute(
             select(RunScenarioResult).where(RunScenarioResult.run_id == run.id)
         )
         results = res_result.scalars().all()
-        avg = sum(r.score for r in results) / len(results) if results else 0.0
-        out.append(RunOut(
-            run_id=run.id,
-            project=run.project,
-            variant_name=run.variant_name,
-            model_name=run.model_name,
-            created_at=run.created_at,
-            avg_score=round(avg, 4),
-            results=[ScenarioResultOut(
-                scenario_id=r.scenario_id,
-                variant_id=r.variant_id,
-                score=r.score,
-                reason=r.reason,
-                latency_ms=r.latency_ms,
-                judge_model=r.judge_model,
-            ) for r in results],
-        ))
+        out.append(await _build_run_out(run, results))
     return out
 
 
@@ -265,7 +284,6 @@ async def delete_run(
     run = result.scalars().first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-
     await db.execute(delete(RunScenarioResult).where(RunScenarioResult.run_id == run_id))
     await db.execute(delete(Run).where(Run.id == run_id))
     await db.commit()
@@ -280,34 +298,15 @@ async def get_shared_run(
     run_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """Public read-only endpoint — returns run data without requiring authentication."""
     result = await db.execute(select(Run).where(Run.id == run_id))
     run = result.scalars().first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-
     res_result = await db.execute(
         select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
     )
     results = res_result.scalars().all()
-    avg = sum(r.score for r in results) / len(results) if results else 0.0
-
-    return RunOut(
-        run_id=run.id,
-        project=run.project,
-        variant_name=run.variant_name,
-        model_name=run.model_name,
-        created_at=run.created_at,
-        avg_score=round(avg, 4),
-        results=[ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-        ) for r in results],
-    )
+    return await _build_run_out(run, results)
 
 
 @app.get("/health")

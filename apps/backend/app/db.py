@@ -1,5 +1,6 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import text
 from typing import AsyncGenerator
 from .models import Base
 
@@ -16,8 +17,6 @@ elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL
 
 is_postgres = "asyncpg" in DATABASE_URL
 
-# Supabase uses PgBouncer in transaction mode which does NOT support
-# prepared statements — statement_cache_size=0 disables them.
 connect_args = {}
 if is_postgres:
     connect_args = {
@@ -38,7 +37,26 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def _migrate_add_columns():
+    """Safely add new columns to existing tables without dropping data."""
+    new_columns = [
+        ("runs", "scenarios_yaml", "TEXT"),
+        ("runs", "rubric", "TEXT"),
+        ("runs", "app_endpoint_url", "TEXT"),
+    ]
+    async with engine.begin() as conn:
+        for table, column, col_type in new_columns:
+            try:
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                )
+            except Exception:
+                # Column already exists — safe to ignore
+                pass
+
+
 async def init_db():
-    """Create all tables on startup if they don't exist."""
+    """Create all tables on startup, then apply safe column migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _migrate_add_columns()

@@ -17,8 +17,11 @@ export interface Run {
   variant_name: string;
   model_name: string;
   created_at?: string;
-  avg_score: number;   // pre-computed by backend
+  avg_score: number;
   results: ScenarioResult[];
+  scenarios_yaml?: string;
+  rubric?: string;
+  app_endpoint_url?: string;
 }
 
 export async function fetchRuns(): Promise<Run[]> {
@@ -47,4 +50,24 @@ export async function deleteRun(runId: string): Promise<void> {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete run");
+}
+
+export async function rerunRun(runId: string): Promise<Run> {
+  const res = await fetch(`${API_BASE}/api/runs/${runId}/rerun`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Re-run failed");
+  }
+  return res.json();
+}
+
+export async function fetchModels(): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/api/models`);
+  if (!res.ok) return ["llama-3.1-8b-instant"];
+  const data = await res.json();
+  return data.models;
 }
