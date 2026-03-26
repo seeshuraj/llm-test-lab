@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { use } from "react";
-import { fetchRun, Run } from "@/lib/api";
+import { fetchRun, exportRunCSV, Run } from "@/lib/api";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
-  LineChart, Line,
 } from "recharts";
 
 const scoreColor = (s: number) =>
@@ -26,6 +25,11 @@ const CustomBarTooltip = ({ active, payload }: any) => {
   );
 };
 
+// Skeleton placeholder card
+function SkeletonCard() {
+  return <div className="h-24 bg-gray-800 rounded-xl animate-pulse" />;
+}
+
 export default function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [run, setRun] = useState<Run | null>(null);
@@ -42,9 +46,26 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     </main>
   );
 
+  // Skeleton loading state
   if (!run) return (
-    <main className="max-w-5xl mx-auto p-8">
-      <p className="text-gray-400">Loading...</p>
+    <main className="max-w-6xl mx-auto p-8">
+      <div className="h-4 w-24 bg-gray-700 rounded animate-pulse mb-6" />
+      <div className="h-8 w-64 bg-gray-700 rounded animate-pulse mb-2" />
+      <div className="h-4 w-96 bg-gray-800 rounded animate-pulse mb-8" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-64 bg-gray-800 rounded-xl animate-pulse" />
+        ))}
+      </div>
+      <div className="h-64 bg-gray-800 rounded-xl animate-pulse mb-8" />
+      <div className="space-y-2">
+        {[...Array(5)].map((_, i) => (
+          <div key={i} className="h-10 bg-gray-800 rounded animate-pulse" />
+        ))}
+      </div>
     </main>
   );
 
@@ -60,7 +81,6 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   const warned = scores.filter((s) => s >= 0.5 && s < 0.8).length;
   const failed = scores.filter((s) => s < 0.5).length;
 
-  // Per-scenario bar chart data
   const barData = run.results.map((r) => ({
     id: r.scenario_id,
     score: r.score,
@@ -68,14 +88,12 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     reason: r.reason,
   }));
 
-  // Donut data
   const donutData = [
     { name: "Pass (≥0.8)", value: passed, color: "#10b981" },
     { name: "Warn (0.5–0.8)", value: warned, color: "#f59e0b" },
     { name: "Fail (<0.5)", value: failed, color: "#ef4444" },
   ].filter((d) => d.value > 0);
 
-  // Score distribution buckets
   const buckets: Record<string, number> = { "0.0–0.2": 0, "0.2–0.4": 0, "0.4–0.6": 0, "0.6–0.8": 0, "0.8–1.0": 0 };
   scores.forEach((s) => {
     if (s < 0.2) buckets["0.0–0.2"]++;
@@ -86,19 +104,34 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   });
   const distData = Object.entries(buckets).map(([range, count]) => ({ range, count }));
 
+  const displayName = run.run_label || `${run.run_id.slice(0, 8)}…`;
+
   return (
     <main className="max-w-6xl mx-auto p-8">
       <Link href="/" className="text-blue-400 hover:underline text-sm">← Back to runs</Link>
 
       {/* Header */}
-      <div className="mt-4 mb-6">
-        <h1 className="text-2xl font-bold text-white">Run: <span className="font-mono text-blue-300">{run.run_id.slice(0, 8)}…</span></h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Project: <span className="text-white">{run.project}</span> ·
-          Variant: <span className="text-white">{run.variant_name}</span> ·
-          Model: <span className="text-white">{run.model_name}</span> ·
-          {run.created_at && <> {new Date(run.created_at).toLocaleString()}</>}
-        </p>
+      <div className="mt-4 mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">
+            {run.run_label
+              ? <>{run.run_label} <span className="text-gray-500 font-mono text-base ml-2">{run.run_id.slice(0, 8)}</span></>
+              : <>Run: <span className="font-mono text-blue-300">{run.run_id.slice(0, 8)}…</span></>
+            }
+          </h1>
+          <p className="text-gray-400 text-sm mt-1">
+            Project: <span className="text-white">{run.project}</span> ·
+            Variant: <span className="text-white">{run.variant_name}</span> ·
+            Model: <span className="text-white">{run.model_name}</span> ·
+            {run.created_at && <> {new Date(run.created_at).toLocaleString()}</>}
+          </p>
+        </div>
+        <button
+          onClick={() => exportRunCSV(run)}
+          className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+        >
+          ⬇️ Export CSV
+        </button>
       </div>
 
       {/* Stat cards */}
@@ -118,8 +151,6 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
 
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-
-        {/* Pass/Fail donut */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-gray-300 mb-4">Pass / Warn / Fail</h2>
           <ResponsiveContainer width="100%" height={200}>
@@ -139,7 +170,6 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
           </div>
         </div>
 
-        {/* Score distribution */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-gray-300 mb-4">Score Distribution</h2>
           <ResponsiveContainer width="100%" height={200}>
@@ -158,7 +188,6 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
           </ResponsiveContainer>
         </div>
 
-        {/* Latency per scenario */}
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-gray-300 mb-4">Latency per Scenario (ms)</h2>
           <ResponsiveContainer width="100%" height={200}>

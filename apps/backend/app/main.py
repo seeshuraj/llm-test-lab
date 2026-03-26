@@ -61,9 +61,10 @@ class RunLocalRequest(BaseModel):
     project: str
     variant_name: str = "v1"
     model_name: str = "llama-3.1-8b-instant"
+    run_label: Optional[str] = None  # optional human-readable name
     scenarios_yaml: str
     app_endpoint_url: Optional[str] = None
-    rubric: Optional[str] = None  # falls back to DEFAULT_RUBRIC if omitted
+    rubric: Optional[str] = None
 
 
 class ScenarioResultOut(BaseModel):
@@ -80,6 +81,7 @@ class RunOut(BaseModel):
     project: str
     variant_name: str
     model_name: str
+    run_label: Optional[str] = None
     created_at: Optional[datetime]
     avg_score: float
     results: List[ScenarioResultOut]
@@ -99,6 +101,7 @@ async def _build_run_out(run: Run, results: list) -> RunOut:
         project=run.project,
         variant_name=run.variant_name,
         model_name=run.model_name,
+        run_label=run.run_label,
         created_at=run.created_at,
         avg_score=round(avg, 4),
         scenarios_yaml=run.scenarios_yaml,
@@ -196,6 +199,7 @@ async def run_local(
         project=req.project,
         variant_name=variant.name,
         model_name=variant.model_name,
+        run_label=req.run_label.strip() if req.run_label and req.run_label.strip() else None,
         created_at=created_at,
         user_id=current_user.id,
         scenarios_yaml=req.scenarios_yaml,
@@ -225,7 +229,6 @@ async def rerun(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Replay an existing run with the same YAML, rubric, model, and endpoint."""
     result = await db.execute(
         select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
     )
@@ -235,13 +238,13 @@ async def rerun(
     if not original.scenarios_yaml:
         raise HTTPException(status_code=400, detail="Original run has no stored YAML — cannot re-run")
 
-    # If original model is no longer supported, fall back to default
     model = original.model_name if original.model_name in SUPPORTED_MODELS else SUPPORTED_MODELS[0]
 
     req = RunLocalRequest(
         project=original.project,
         variant_name=original.variant_name,
         model_name=model,
+        run_label=original.run_label,
         scenarios_yaml=original.scenarios_yaml,
         rubric=original.rubric,
         app_endpoint_url=original.app_endpoint_url,

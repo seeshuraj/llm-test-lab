@@ -29,6 +29,7 @@ class Run(Base):
     project: Mapped[str] = mapped_column(String, nullable=False)
     variant_name: Mapped[str] = mapped_column(String, nullable=False)
     model_name: Mapped[str] = mapped_column(String, nullable=False)
+    run_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # human-readable name
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

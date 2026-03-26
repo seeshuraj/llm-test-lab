@@ -16,6 +16,7 @@ export interface Run {
   project: string;
   variant_name: string;
   model_name: string;
+  run_label?: string;
   created_at?: string;
   avg_score: number;
   results: ScenarioResult[];
@@ -70,4 +71,25 @@ export async function fetchModels(): Promise<string[]> {
   if (!res.ok) return ["llama-3.1-8b-instant"];
   const data = await res.json();
   return data.models;
+}
+
+/** Export a run's scenario results as a CSV string and trigger browser download */
+export function exportRunCSV(run: Run): void {
+  const label = run.run_label || run.run_id.slice(0, 8);
+  const headers = ["scenario_id", "score", "latency_ms", "judge_model", "reason"];
+  const rows = run.results.map((r) => [
+    r.scenario_id,
+    r.score.toFixed(4),
+    r.latency_ms.toFixed(0),
+    r.judge_model,
+    `"${r.reason.replace(/"/g, '""')}"`  // escape quotes in reason
+  ]);
+  const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `llm-test-lab-${label}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

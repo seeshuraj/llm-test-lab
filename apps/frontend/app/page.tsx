@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, deleteRun, rerunRun, fetchModels, Run } from "@/lib/api";
+import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, Run } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
 import {
   listSavedScenarios, saveScenario, deleteScenario, SavedScenario,
@@ -39,7 +39,6 @@ Rules:
 const scoreColor = (s: number) =>
   s >= 0.8 ? "#10b981" : s >= 0.5 ? "#f59e0b" : "#ef4444";
 
-// Resolve color: Tailwind class strings become undefined for style prop; hex strings are used directly
 function resolveStatColor(color: string): string {
   return color.startsWith("#") ? color : "#ffffff";
 }
@@ -57,6 +56,7 @@ export default function HomePage() {
   // Form state
   const [project, setProject] = useState("demo-project");
   const [variant, setVariant] = useState("v1");
+  const [runLabel, setRunLabel] = useState("");
   const [modelName, setModelName] = useState("llama-3.1-8b-instant");
   const [availableModels, setAvailableModels] = useState<string[]>(["llama-3.1-8b-instant"]);
   const [scenariosYaml, setScenariosYaml] = useState("");
@@ -186,6 +186,7 @@ export default function HomePage() {
           project,
           variant_name: variant,
           model_name: modelName,
+          run_label: runLabel.trim() || null,
           app_endpoint_url: appUrl || null,
           rubric: rubric.trim() || null,
         }),
@@ -195,7 +196,7 @@ export default function HomePage() {
         throw new Error(err.detail || "Run failed");
       }
       setShowForm(false);
-      setScenariosYaml(""); setFileName(""); setRubric("");
+      setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel("");
       loadRuns();
     } catch (e) {
       setFormError(String(e));
@@ -220,7 +221,7 @@ export default function HomePage() {
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .slice(-10)
     .map((r) => ({
-      t: r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6),
+      t: r.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
       avg: r.avg_score,
     }));
 
@@ -294,6 +295,14 @@ export default function HomePage() {
             <h2 className="text-xl font-bold text-white mb-4">New Evaluation Run</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
 
+              {/* Run label */}
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">Run label <span className="text-gray-600">(optional)</span></label>
+                <input type="text" value={runLabel} onChange={(e) => setRunLabel(e.target.value)}
+                  placeholder="e.g. GPT-4 baseline, Tuesday QA test"
+                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+              </div>
+
               {/* Project + Variant */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -308,7 +317,7 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Model selector (#9) */}
+              {/* Model selector */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Model</label>
                 <select value={modelName} onChange={(e) => setModelName(e.target.value)}
@@ -319,7 +328,7 @@ export default function HomePage() {
                 </select>
               </div>
 
-              {/* Scenario library + YAML input (#10) */}
+              {/* Scenario library + YAML input */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-sm text-gray-400">Scenarios YAML</label>
@@ -407,7 +416,7 @@ export default function HomePage() {
                 <p className="text-xs text-gray-500 mt-1">POST {`{ question, context }`} → expects {`{ answer }`}. Leave blank for echo mode.</p>
               </div>
 
-              {/* Custom rubric (#8) */}
+              {/* Custom rubric */}
               <div>
                 <button type="button" onClick={() => setShowRubric(!showRubric)}
                   className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">
@@ -430,7 +439,7 @@ export default function HomePage() {
                   className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium transition-colors">
                   {submitting ? "Running eval..." : "Run Evaluation"}
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setFormError(null); setScenariosYaml(""); setFileName(""); setRubric(""); }}
+                <button type="button" onClick={() => { setShowForm(false); setFormError(null); setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel(""); }}
                   className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg text-sm font-medium transition-colors">Cancel</button>
               </div>
             </form>
@@ -440,7 +449,11 @@ export default function HomePage() {
 
       {/* Runs table */}
       {loading ? (
-        <p className="text-gray-400">Loading runs...</p>
+        <div className="space-y-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-12 bg-gray-800 rounded-lg animate-pulse" />
+          ))}
+        </div>
       ) : error ? (
         <p className="text-red-400">Failed to connect: {error}</p>
       ) : runs.length === 0 ? (
@@ -453,7 +466,7 @@ export default function HomePage() {
           <table className="w-full text-sm text-left">
             <thead className="bg-gray-800 text-gray-300">
               <tr>
-                <th className="px-4 py-3">Run ID</th>
+                <th className="px-4 py-3">Label / ID</th>
                 <th className="px-4 py-3">Project</th>
                 <th className="px-4 py-3">Variant</th>
                 <th className="px-4 py-3">Model</th>
@@ -471,7 +484,12 @@ export default function HomePage() {
                 const pass = scores.length ? (scores.filter((s) => s >= 0.8).length / scores.length) * 100 : 0;
                 return (
                   <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</td>
+                    <td className="px-4 py-3">
+                      {run.run_label
+                        ? <span className="text-white font-medium text-sm">{run.run_label}</span>
+                        : <span className="font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</span>
+                      }
+                    </td>
                     <td className="px-4 py-3 text-white">{run.project}</td>
                     <td className="px-4 py-3 text-gray-300">{run.variant_name}</td>
                     <td className="px-4 py-3 text-gray-400 text-xs font-mono">{run.model_name}</td>
@@ -497,6 +515,10 @@ export default function HomePage() {
                           title="Re-run with same YAML + settings"
                           className="text-xs text-green-400 hover:text-green-300 disabled:opacity-40 transition-colors">
                           {rerunning === run.run_id ? "⏳" : "🔁"}
+                        </button>
+                        <button onClick={() => exportRunCSV(run)} title="Export as CSV"
+                          className="text-xs text-gray-400 hover:text-white transition-colors">
+                          ⬇️
                         </button>
                         <button onClick={() => handleCopyShareLink(run.run_id)} title="Copy shareable link"
                           className="text-xs text-gray-400 hover:text-white transition-colors">
