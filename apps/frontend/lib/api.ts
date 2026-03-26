@@ -17,6 +17,7 @@ export interface Run {
   variant_name: string;
   model_name: string;
   created_at?: string;
+  avg_score: number;   // pre-computed by backend, use this directly
   results: ScenarioResult[];
 }
 
