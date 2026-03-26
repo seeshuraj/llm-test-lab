@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 import httpx
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,8 +15,9 @@ from .db import get_db, init_db
 from .models import Run, RunScenarioResult, User
 
 from llm_test_lab_core.models import Variant
+from llm_test_lab_core.judges_groq import GroqJudgeClient
 from llm_test_lab.scenarios_yaml import load_scenarios_from_string
-from llm_test_lab.runner import run_evaluation
+from llm_test_lab.runner_local import run_suite
 
 app = FastAPI(title="LLM Test Lab API")
 
@@ -30,6 +31,12 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/auth")
 
+DEFAULT_RUBRIC = (
+    "Score the answer based on correctness, relevance to the question, "
+    "and grounding in the provided context documents. "
+    "Penalise hallucinations or answers that contradict the context."
+)
+
 
 @app.on_event("startup")
 async def on_startup():
@@ -37,7 +44,7 @@ async def on_startup():
 
 
 # ---------------------------------------------------------------------------
-# Request / Response schemas
+# Schemas
 # ---------------------------------------------------------------------------
 
 class RunLocalRequest(BaseModel):
@@ -68,21 +75,6 @@ class RunOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-async def _call_app_endpoint(url: str, question: str) -> str:
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json={"question": question})
-        resp.raise_for_status()
-        return resp.json().get("answer", "")
-
-
-def _echo(question: str) -> str:
-    return f"Echo: {question}"
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -92,7 +84,6 @@ async def run_local(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Parse scenarios
     try:
         scenarios = load_scenarios_from_string(req.scenarios_yaml)
     except Exception as e:
@@ -104,28 +95,30 @@ async def run_local(
         model_name=req.model_name,
     )
 
-    groq_api_key = os.environ.get("GROQ_API_KEY", "")
+    judge = GroqJudgeClient(model=req.model_name)
 
-    # Build answer function
     if req.app_endpoint_url:
-        async def answer_fn(question: str) -> str:
-            return await _call_app_endpoint(req.app_endpoint_url, question)
+        async def app_call(question: str) -> str:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(req.app_endpoint_url, json={"question": question})
+                resp.raise_for_status()
+                return resp.json().get("answer", "")
     else:
-        async def answer_fn(question: str) -> str:
-            return _echo(question)
+        async def app_call(question: str) -> str:
+            return f"Echo: {question}"
 
-    # Run evaluation
-    run_result = await run_evaluation(
-        scenarios=scenarios,
-        variant=variant,
-        answer_fn=answer_fn,
-        groq_api_key=groq_api_key,
-        project=req.project,
-    )
-
-    # Persist to DB (scoped to current user)
-    run_id = run_result.run_id
+    run_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc)
+
+    run_result = await run_suite(
+        run_id=run_id,
+        project=req.project,
+        variant=variant,
+        scenarios=scenarios,
+        judge=judge,
+        app_call=app_call,
+        rubric=DEFAULT_RUBRIC,
+    )
 
     db_run = Run(
         id=run_id,
@@ -159,7 +152,14 @@ async def run_local(
         model_name=variant.model_name,
         created_at=created_at,
         avg_score=round(avg, 4),
-        results=[ScenarioResultOut(**r.model_dump()) for r in run_result.results],
+        results=[ScenarioResultOut(
+            scenario_id=r.scenario_id,
+            variant_id=r.variant_id,
+            score=r.score,
+            reason=r.reason,
+            latency_ms=r.latency_ms,
+            judge_model=r.judge_model,
+        ) for r in run_result.results],
     )
 
 
