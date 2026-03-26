@@ -3,24 +3,27 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from typing import AsyncGenerator
 from .models import Base
 
-# Use DATABASE_URL env var (Supabase PostgreSQL connection string)
-# Format: postgresql+asyncpg://user:password@host:port/dbname
-# For Supabase: use the "Transaction" pooler URL from Settings > Database
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "sqlite+aiosqlite:///./llm_test_lab.db"  # fallback for local dev
+    "sqlite+aiosqlite:///./llm_test_lab.db"
 )
 
-# Supabase connection strings may start with 'postgres://' — fix for SQLAlchemy
+# Normalise Supabase/Heroku postgres:// URLs
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-# SSL required for Supabase
+is_postgres = "asyncpg" in DATABASE_URL
+
+# Supabase uses PgBouncer in transaction mode which does NOT support
+# prepared statements — statement_cache_size=0 disables them.
 connect_args = {}
-if "asyncpg" in DATABASE_URL:
-    connect_args = {"ssl": "require"}
+if is_postgres:
+    connect_args = {
+        "ssl": "require",
+        "statement_cache_size": 0,
+    }
 
 engine = create_async_engine(
     DATABASE_URL,
