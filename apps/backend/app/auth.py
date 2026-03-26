@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import bcrypt
 from jose import JWTError, jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Form
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -24,11 +24,6 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 class RegisterRequest(BaseModel):
-    email: str
-    password: str
-
-
-class LoginRequest(BaseModel):
     email: str
     password: str
 
@@ -102,11 +97,16 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(models.User).where(models.User.email == req.email))
+async def login(
+    username: str = Form(...),   # OAuth2 form field — frontend sends 'username'
+    password: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    # 'username' field holds the email address (OAuth2 convention)
+    res = await db.execute(select(models.User).where(models.User.email == username))
     user = res.scalars().first()
 
-    if not user or not verify_password(req.password, user.hashed_password):
+    if not user or not verify_password(password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     return TokenResponse(access_token=create_access_token(user.id))
