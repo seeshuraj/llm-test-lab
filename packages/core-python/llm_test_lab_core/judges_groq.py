@@ -6,10 +6,15 @@ import httpx
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# Always use the strongest available model as judge for consistent, unbiased scoring
+JUDGE_MODEL = "llama-3.3-70b-versatile"
+
 
 class GroqJudgeClient:
     def __init__(self, model: str = "llama-3.1-8b-instant"):
-        self.model = model
+        # 'model' param kept for API compatibility but judge always uses JUDGE_MODEL
+        self.tested_model = model
+        self.model = JUDGE_MODEL
         self.api_key = os.environ.get("GROQ_API_KEY", "")
 
     async def score(
@@ -18,6 +23,7 @@ class GroqJudgeClient:
         answer: str,
         context_docs: List[str],
         rubric: str,
+        expected_keywords: List[str] = [],
     ) -> Dict:
         if not self.api_key:
             return {
@@ -28,7 +34,7 @@ class GroqJudgeClient:
             }
 
         system_prompt = (
-            "You are a strict evaluation model. "
+            "You are a strict, impartial evaluation model. "
             "Given a question, context documents, and an answer, "
             "score the answer between 0.0 and 1.0 on correctness and grounding. "
             "1.0 = perfectly correct and grounded. 0.0 = completely wrong or hallucinated. "
@@ -38,11 +44,20 @@ class GroqJudgeClient:
 
         context_text = "\n".join(context_docs) if context_docs else "(no context provided)"
 
+        keyword_instruction = ""
+        if expected_keywords:
+            kw_list = ", ".join(f'"{k}"' for k in expected_keywords)
+            keyword_instruction = (
+                f"\n\nRequired keywords: {kw_list}. "
+                "Penalise heavily (deduct at least 0.3) if ANY of these keywords are missing from the answer."
+            )
+
         user_prompt = (
             f"Question: {question}\n\n"
             f"Context:\n{context_text}\n\n"
             f"Answer: {answer}\n\n"
-            f"Rubric: {rubric}\n\n"
+            f"Rubric: {rubric}"
+            f"{keyword_instruction}\n\n"
             'Respond ONLY with JSON: {"score": <float 0-1>, "reason": "<one sentence>"}'
         )
 
@@ -61,7 +76,9 @@ class GroqJudgeClient:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": 0.1,
+                    # temperature=0 for deterministic, reproducible scores
+                    "temperature": 0,
+                    "seed": 42,
                 },
             )
             resp.raise_for_status()
