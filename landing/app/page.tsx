@@ -2,6 +2,10 @@ import WaitlistFormClient from "./WaitlistFormClient";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://llm-test-lab-app.vercel.app";
 
+// TODO: Replace with real Stripe Payment Link URLs
+const STRIPE_PRO_URL = process.env.NEXT_PUBLIC_STRIPE_PRO_URL ?? "#pricing";
+const STRIPE_TEAMS_URL = process.env.NEXT_PUBLIC_STRIPE_TEAMS_URL ?? "#pricing";
+
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-gray-950 text-white">
@@ -10,7 +14,6 @@ export default function LandingPage() {
         <span className="text-xl font-bold text-white">🧪 LLM Test Lab</span>
         <div className="flex items-center gap-4">
           <a href="#features" className="text-gray-400 hover:text-white text-sm transition-colors">Features</a>
-          <a href="#compare" className="text-gray-400 hover:text-white text-sm transition-colors">Compare</a>
           <a href="#pricing" className="text-gray-400 hover:text-white text-sm transition-colors">Pricing</a>
           <a href="#how" className="text-gray-400 hover:text-white text-sm transition-colors">How it works</a>
           <a
@@ -131,42 +134,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Comparison table */}
-      <section id="compare" className="max-w-4xl mx-auto px-8 py-20 border-t border-gray-800">
-        <h2 className="text-3xl font-bold text-center mb-4">How we compare</h2>
-        <p className="text-gray-400 text-center mb-12 max-w-xl mx-auto">The only tool that combines RAG metrics, A/B testing, and latency tracking in one simple UI.</p>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-700">
-                <th className="text-left py-3 text-gray-400 font-medium w-48">Feature</th>
-                <th className="text-center py-3 text-blue-400 font-semibold">LLM Test Lab</th>
-                <th className="text-center py-3 text-gray-400 font-medium">Ragas</th>
-                <th className="text-center py-3 text-gray-400 font-medium">Langfuse</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                ["RAG metrics (4 dimensions)", "✅", "✅", "❌"],
-                ["Visual dashboard / UI", "✅", "❌", "✅"],
-                ["A/B run comparison", "✅", "❌", "⚠️ Manual"],
-                ["Latency tracking", "✅", "❌", "✅"],
-                ["Custom rubric per run", "✅", "❌", "❌"],
-                ["No-code scenario upload", "✅", "❌", "❌"],
-                ["Free tier", "✅", "✅ OSS", "✅"],
-              ].map(([feature, ours, ragas, langfuse]) => (
-                <tr key={feature as string} className="border-b border-gray-800 hover:bg-gray-900 transition-colors">
-                  <td className="py-3 text-gray-300">{feature}</td>
-                  <td className="py-3 text-center">{ours}</td>
-                  <td className="py-3 text-center text-gray-400">{ragas}</td>
-                  <td className="py-3 text-center text-gray-400">{langfuse}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       {/* How it works */}
       <section id="how" className="max-w-4xl mx-auto px-8 py-20 border-t border-gray-800">
         <h2 className="text-3xl font-bold text-center mb-14">How it works</h2>
@@ -202,6 +169,7 @@ export default function LandingPage() {
               features: ["50 scenarios / month", "Unlimited projects", "A/B comparison", "7-day history"],
               cta: "Start Free",
               href: APP_URL,
+              external: true,
               highlight: false,
             },
             {
@@ -210,8 +178,9 @@ export default function LandingPage() {
               period: "/ month",
               desc: "For developers shipping production AI apps.",
               features: ["2,000 scenarios / month", "RAG metrics (4 dimensions)", "Latency tracking", "90-day history", "Shareable run links"],
-              cta: "Get Pro",
-              href: "#waitlist",
+              cta: "Upgrade to Pro →",
+              href: STRIPE_PRO_URL,
+              external: STRIPE_PRO_URL.startsWith("http"),
               highlight: true,
             },
             {
@@ -220,8 +189,9 @@ export default function LandingPage() {
               period: "/ month",
               desc: "For teams running evals across multiple apps.",
               features: ["Unlimited scenarios", "Everything in Pro", "Team workspace", "1-year history", "Priority support"],
-              cta: "Get Teams",
-              href: "#waitlist",
+              cta: "Upgrade to Teams →",
+              href: STRIPE_TEAMS_URL,
+              external: STRIPE_TEAMS_URL.startsWith("http"),
               highlight: false,
             },
           ].map((plan) => (
@@ -251,7 +221,8 @@ export default function LandingPage() {
               </ul>
               <a
                 href={plan.href}
-                target={plan.href.startsWith("http") ? "_blank" : undefined}
+                target={plan.external ? "_blank" : undefined}
+                rel={plan.external ? "noopener noreferrer" : undefined}
                 className={`block text-center py-2.5 rounded-lg font-medium text-sm transition-colors ${
                   plan.highlight
                     ? "bg-blue-600 hover:bg-blue-500 text-white"
@@ -263,6 +234,7 @@ export default function LandingPage() {
             </div>
           ))}
         </div>
+        <p className="text-center text-gray-600 text-xs mt-8">Payments securely processed by Stripe. Cancel anytime.</p>
       </section>
 
       {/* Waitlist */}
