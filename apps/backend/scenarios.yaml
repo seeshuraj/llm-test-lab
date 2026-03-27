@@ -1,19 +1,14 @@
-- id: s1
-  name: What is LLM Test Lab
-  question: "What is LLM Test Lab?"
-  context_docs:
-    - "LLM Test Lab is a platform for evaluating RAG and AI agent systems."
-    - "It supports scenario-based testing, load testing, and cost analytics."
-  expected_answer: null
-  tags:
-    - demo
+scenarios:
+  - id: s1
+    question: "What is LLM Test Lab?"
+    context_docs:
+      - "LLM Test Lab is a platform for evaluating RAG and AI agent systems."
+      - "It supports scenario-based testing, load testing, and cost analytics."
+    expected_keywords: ["evaluate", "RAG", "platform"]
 
-- id: s2
-  name: Who is it for
-  question: "Who should use LLM Test Lab?"
-  context_docs:
-    - "LLM Test Lab is designed for AI engineers and product teams building RAG pipelines."
-    - "It helps teams catch regressions before deploying AI features to production."
-  expected_answer: null
-  tags:
-    - demo
+  - id: s2
+    question: "Who should use LLM Test Lab?"
+    context_docs:
+      - "LLM Test Lab is designed for AI engineers and product teams building RAG pipelines."
+      - "It helps teams catch regressions before deploying AI features to production."
+    expected_keywords: ["AI engineers", "RAG", "regressions"]
