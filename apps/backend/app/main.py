@@ -15,6 +15,7 @@ from sqlalchemy import select, delete
 from .auth import router as auth_router, get_current_user
 from .db import get_db, init_db
 from .models import Run, RunScenarioResult, User
+from .rag_metrics import compute_rag_metrics
 
 from llm_test_lab_core.models import Variant
 from llm_test_lab_core.judges_groq import GroqJudgeClient
@@ -82,6 +83,7 @@ class RunLocalRequest(BaseModel):
     scenarios_yaml: str
     app_endpoint_url: Optional[str] = None
     rubric: Optional[str] = None
+    enable_rag_metrics: bool = False  # opt-in: set True for RAG scenarios
 
 
 class RunLabelUpdate(BaseModel):
@@ -95,6 +97,7 @@ class ScenarioResultOut(BaseModel):
     reason: str
     latency_ms: float
     judge_model: str
+    rag_scores: Optional[dict] = None  # faithfulness, context_recall, answer_relevancy, context_precision
 
 
 class RunOut(BaseModel):
@@ -109,6 +112,7 @@ class RunOut(BaseModel):
     scenarios_yaml: Optional[str] = None
     rubric: Optional[str] = None
     app_endpoint_url: Optional[str] = None
+    enable_rag_metrics: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +139,7 @@ async def _build_run_out(run: Run, results: list) -> RunOut:
             reason=r.reason,
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
+            rag_scores=r.rag_scores,
         ) for r in results],
     )
 
@@ -237,6 +242,29 @@ async def run_local(
     db.add(db_run)
 
     for r in run_result.results:
+        # Compute RAG metrics if opted-in and context is present
+        rag_scores_dict = None
+        if req.enable_rag_metrics:
+            # Find the matching scenario to get context
+            matching_scenario = next(
+                (s for s in scenarios if s.id == r.scenario_id), None
+            )
+            context_text = getattr(matching_scenario, "context", "") or ""
+            question_text = getattr(matching_scenario, "question", "") or ""
+            answer_text = getattr(r, "answer", "") or getattr(r, "reason", "")
+
+            if context_text and question_text:
+                try:
+                    rag_scores = await compute_rag_metrics(
+                        question=question_text,
+                        context=context_text,
+                        answer=answer_text,
+                        judge=judge,
+                    )
+                    rag_scores_dict = rag_scores.to_dict()
+                except Exception:
+                    rag_scores_dict = None
+
         db.add(RunScenarioResult(
             run_id=run_id,
             scenario_id=r.scenario_id,
@@ -245,6 +273,7 @@ async def run_local(
             reason=r.reason,
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
+            rag_scores=rag_scores_dict,
         ))
 
     await db.commit()

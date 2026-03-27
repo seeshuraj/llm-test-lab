@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import String, Float, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -29,7 +29,7 @@ class Run(Base):
     project: Mapped[str] = mapped_column(String, nullable=False)
     variant_name: Mapped[str] = mapped_column(String, nullable=False)
     model_name: Mapped[str] = mapped_column(String, nullable=False)
-    run_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # human-readable name
+    run_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -55,5 +55,7 @@ class RunScenarioResult(Base):
     reason: Mapped[str] = mapped_column(String, nullable=False)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     judge_model: Mapped[str] = mapped_column(String, nullable=False)
+    # RAG-specific metrics — null for non-RAG scenarios
+    rag_scores: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     run: Mapped["Run"] = relationship("Run", back_populates="results")

@@ -10,5 +10,7 @@ python-multipart
 pydantic
 pyyaml
 groq
+sentence-transformers
+numpy
 -e ../../packages/core-python
 -e ../../packages/sdk-python
