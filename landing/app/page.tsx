@@ -1,6 +1,8 @@
 import Link from "next/link";
 import WaitlistFormClient from "./WaitlistFormClient";
 
+const APP_URL = "https://llm-test-lab-app.vercel.app";
+
 export default function LandingPage() {
   return (
     <main className="min-h-screen bg-gray-950 text-white">
@@ -13,7 +15,8 @@ export default function LandingPage() {
           <a href="#pricing" className="text-gray-400 hover:text-white text-sm transition-colors">Pricing</a>
           <a href="#how" className="text-gray-400 hover:text-white text-sm transition-colors">How it works</a>
           <a
-            href={process.env.NEXT_PUBLIC_APP_URL || "#waitlist"}
+            href={APP_URL}
+            target="_blank"
             className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
             Open App →
@@ -35,7 +38,8 @@ export default function LandingPage() {
         </p>
         <div className="flex items-center justify-center gap-4 flex-wrap">
           <a
-            href={process.env.NEXT_PUBLIC_APP_URL || "#waitlist"}
+            href={APP_URL}
+            target="_blank"
             className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-lg font-medium transition-colors"
           >
             Start Evaluating Free →
@@ -198,7 +202,7 @@ export default function LandingPage() {
               desc: "For individuals evaluating side projects.",
               features: ["50 scenarios / month", "Unlimited projects", "A/B comparison", "7-day history"],
               cta: "Start Free",
-              href: process.env.NEXT_PUBLIC_APP_URL || "#waitlist",
+              href: APP_URL,
               highlight: false,
             },
             {
@@ -248,6 +252,7 @@ export default function LandingPage() {
               </ul>
               <a
                 href={plan.href}
+                target={plan.href.startsWith("http") ? "_blank" : undefined}
                 className={`block text-center py-2.5 rounded-lg font-medium text-sm transition-colors ${
                   plan.highlight
                     ? "bg-blue-600 hover:bg-blue-500 text-white"
