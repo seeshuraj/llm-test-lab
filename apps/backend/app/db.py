@@ -47,11 +47,11 @@ async def _migrate_add_columns():
         ("runs", "rubric", "TEXT"),
         ("runs", "app_endpoint_url", "TEXT"),
         ("runs", "run_label", "VARCHAR"),
+        ("run_scenario_results", "rag_scores", "JSONB"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in new_columns:
             if is_postgres:
-                # Postgres: use DO block with IF NOT EXISTS check — fully idempotent
                 sql = f"""
                 DO $$
                 BEGIN
@@ -65,14 +65,12 @@ async def _migrate_add_columns():
                 END$$;
                 """
             else:
-                # SQLite does not support IF NOT EXISTS on ALTER TABLE
                 sql = f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
 
             try:
                 await conn.execute(text(sql))
                 logger.info("Migration OK: %s.%s", table, column)
             except Exception as e:
-                # SQLite will raise if column already exists — safe to ignore
                 logger.warning("Migration skipped %s.%s: %s", table, column, e)
 
 
