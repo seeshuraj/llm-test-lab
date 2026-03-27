@@ -1,7 +1,6 @@
-import Link from "next/link";
 import WaitlistFormClient from "./WaitlistFormClient";
 
-const APP_URL = "https://llm-test-lab-app.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://llm-test-lab-app.vercel.app";
 
 export default function LandingPage() {
   return (
