@@ -1,0 +1,39 @@
+# Example scenarios file for CI evaluation
+# Drop this in your repo and point --scenarios at it
+#
+# Each scenario:
+#   id            - unique identifier shown in results
+#   question      - what gets sent to your app (or the LLM judge)
+#   context_docs  - list of documents your RAG system should use
+#   expected_keywords - words that MUST appear in a good answer
+
+scenarios:
+  - id: capital-france
+    question: "What is the capital of France?"
+    context_docs:
+      - "France is a country in Western Europe. Its capital and largest city is Paris."
+    expected_keywords: ["Paris"]
+
+  - id: causes-of-rain
+    question: "What causes rain?"
+    context_docs:
+      - "Rain forms when water vapour in the atmosphere cools and condenses into droplets heavy enough to fall."
+    expected_keywords: ["water", "condenses"]
+
+  - id: python-gil
+    question: "What is the Python GIL and why does it matter?"
+    context_docs:
+      - "The Global Interpreter Lock (GIL) is a mutex in CPython that prevents multiple threads from executing Python bytecodes simultaneously, limiting true parallelism for CPU-bound tasks."
+    expected_keywords: ["GIL", "threads", "CPython"]
+
+  - id: rag-definition
+    question: "What does RAG stand for in AI?"
+    context_docs:
+      - "RAG stands for Retrieval-Augmented Generation. It is a technique where an LLM is given relevant documents retrieved from a knowledge base before generating an answer."
+    expected_keywords: ["Retrieval", "Augmented", "Generation"]
+
+  - id: out-of-context
+    question: "What is the boiling point of lead?"
+    context_docs:
+      - "Python is a high-level programming language known for its readability and simplicity."
+    expected_keywords: ["not", "context", "don't know"]
