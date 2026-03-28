@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from .auth import router as auth_router, get_current_user
+from .api_keys import router as api_keys_router
 from .db import get_db, init_db
 from .models import Run, RunScenarioResult, User
 from .rag_metrics import compute_rag_metrics
@@ -33,6 +34,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router, prefix="/api/auth")
+app.include_router(api_keys_router, prefix="/api/keys")
 
 DEFAULT_RUBRIC = (
     "Score the answer based on correctness and grounding in the provided context. "
@@ -49,9 +51,6 @@ SUPPORTED_MODELS = [
     "llama-3.3-70b-versatile",
 ]
 
-# ---------------------------------------------------------------------------
-# Per-user rate limiting: max 1 concurrent run + cooldown of 10s between runs
-# ---------------------------------------------------------------------------
 _user_last_run: dict[str, float] = defaultdict(float)
 _user_running: set[str] = set()
 RUN_COOLDOWN_SECONDS = 10
@@ -83,7 +82,7 @@ class RunLocalRequest(BaseModel):
     scenarios_yaml: str
     app_endpoint_url: Optional[str] = None
     rubric: Optional[str] = None
-    enable_rag_metrics: bool = False  # opt-in: set True for RAG scenarios
+    enable_rag_metrics: bool = False
 
 
 class RunLabelUpdate(BaseModel):
@@ -97,7 +96,7 @@ class ScenarioResultOut(BaseModel):
     reason: str
     latency_ms: float
     judge_model: str
-    rag_scores: Optional[dict] = None  # faithfulness, context_recall, answer_relevancy, context_precision
+    rag_scores: Optional[dict] = None
 
 
 class RunOut(BaseModel):
@@ -242,10 +241,8 @@ async def run_local(
     db.add(db_run)
 
     for r in run_result.results:
-        # Compute RAG metrics if opted-in and context is present
         rag_scores_dict = None
         if req.enable_rag_metrics:
-            # Find the matching scenario to get context
             matching_scenario = next(
                 (s for s in scenarios if s.id == r.scenario_id), None
             )
