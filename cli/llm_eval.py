@@ -80,13 +80,15 @@ def print_results(run):
     print(f"{'─'*60}")
 
     passed = 0
+    has_errors = False
     for r in results:
         score = r.get("score", 0)
+        reason = r.get("reason", "")
         icon = "✅" if score >= 0.8 else "⚠️ " if score >= 0.5 else "❌"
         if score >= 0.8:
             passed += 1
         sid = r.get("scenario_id", "")[:30]
-        rag = r.get("rag_metrics", {})
+        rag = r.get("rag_metrics") or {}
         rag_str = ""
         if rag:
             rag_str = (f"  [F:{rag.get('faithfulness',0):.2f}"
@@ -94,13 +96,21 @@ def print_results(run):
                        f" AR:{rag.get('answer_relevancy',0):.2f}"
                        f" CP:{rag.get('context_precision',0):.2f}]")
         print(f"  {icon} [{score:.2f}] {sid}{rag_str}")
+        # Always print reason so errors are visible in CI logs
+        if reason:
+            print(f"       └─ {reason[:200]}")
+            if "error" in reason.lower() or "exception" in reason.lower() or score == 0.0:
+                has_errors = True
 
     pass_rate = (passed / len(results) * 100) if results else 0
-    avg_color = "" 
     print(f"{'─'*60}")
     print(f"  Avg Score : {avg:.3f}")
     print(f"  Pass Rate : {pass_rate:.0f}% ({passed}/{len(results)} passed ≥0.8)")
     print(f"{'─'*60}\n")
+
+    if has_errors:
+        print("⚠️  One or more scenarios failed at the app endpoint — check the reasons above.\n")
+
     return avg
 
 
