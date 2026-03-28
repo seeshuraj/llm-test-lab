@@ -33,7 +33,7 @@ jobs:
             --variant "${{ github.sha }}" \
             --run-label "CI: ${{ github.ref_name }} @ ${{ github.sha }}" \
             --model "llama-3.1-8b-instant" \
-            --app-url "https://llm-test-lab-test.onrender.com/ask" \
+            --app-url "https://llm-test-lab-test.onrender.com/answer" \
             --fail-under 0.6
 
       - name: Upload results summary
