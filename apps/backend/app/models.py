@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Float, DateTime, ForeignKey, Text, JSON
+from sqlalchemy import String, Float, DateTime, ForeignKey, Text, JSON, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from typing import Optional
 
@@ -20,6 +20,24 @@ class User(Base):
     )
 
     runs: Mapped[list["Run"]] = relationship("Run", back_populates="user", cascade="all, delete-orphan")
+    api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "CI / GitHub Actions"
+    key_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # bcrypt hash of raw key
+    key_prefix: Mapped[str] = mapped_column(String, nullable=False)  # first 8 chars shown in UI
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    user: Mapped["User"] = relationship("User", back_populates="api_keys")
 
 
 class Run(Base):
@@ -55,7 +73,6 @@ class RunScenarioResult(Base):
     reason: Mapped[str] = mapped_column(String, nullable=False)
     latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
     judge_model: Mapped[str] = mapped_column(String, nullable=False)
-    # RAG-specific metrics — null for non-RAG scenarios
     rag_scores: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     run: Mapped["Run"] = relationship("Run", back_populates="results")

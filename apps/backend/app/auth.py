@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import bcrypt
 from jose import JWTError, jwt
-from fastapi import APIRouter, Depends, HTTPException, status, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Form, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -14,7 +14,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-to-a-random-secret-in-pro
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 router = APIRouter()
 
@@ -51,6 +51,7 @@ def create_access_token(user_id: str) -> str:
 
 
 async def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> models.User:
@@ -59,6 +60,41 @@ async def get_current_user(
         detail="Invalid or expired token",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    # Extract raw token from Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    raw_token = ""
+    if auth_header.startswith("Bearer "):
+        raw_token = auth_header[7:]
+
+    # --- Try API key first (prefix: ltk_) ---
+    if raw_token.startswith("ltk_"):
+        res = await db.execute(
+            select(models.ApiKey).where(
+                models.ApiKey.revoked == False
+            )
+        )
+        all_keys = res.scalars().all()
+        matched_key = None
+        for k in all_keys:
+            if bcrypt.checkpw(raw_token.encode("utf-8"), k.key_hash.encode("utf-8")):
+                matched_key = k
+                break
+        if not matched_key:
+            raise credentials_exception
+        # Update last_used_at
+        matched_key.last_used_at = datetime.now(timezone.utc)
+        await db.commit()
+        # Load user
+        user_res = await db.execute(select(models.User).where(models.User.id == matched_key.user_id))
+        user = user_res.scalars().first()
+        if not user:
+            raise credentials_exception
+        return user
+
+    # --- Fall back to JWT ---
+    if not token:
+        raise credentials_exception
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
@@ -98,11 +134,10 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    username: str = Form(...),   # OAuth2 form field — frontend sends 'username'
+    username: str = Form(...),
     password: str = Form(...),
     db: AsyncSession = Depends(get_db),
 ):
-    # 'username' field holds the email address (OAuth2 convention)
     res = await db.execute(select(models.User).where(models.User.email == username))
     user = res.scalars().first()
 
