@@ -9,7 +9,19 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Database URL resolution
-# Priority: DATABASE_URL (Railway/Heroku) > SUPABASE_DB_URL > SQLite fallback
+#
+# The backend runs on Render. Set ONE of these in Render > Environment:
+#
+#   DATABASE_URL      — full asyncpg URL  (Render auto-injects this if you
+#                        attach a Render Postgres; also accepted from any host)
+#   SUPABASE_DB_URL   — Supabase connection string, e.g.
+#                        postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres
+#
+# NOTE: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are
+#       frontend-only variables for the JS Supabase client. The backend uses
+#       a direct PostgreSQL connection string — not the anon key.
+#
+# Falls back to SQLite for local dev when neither is set.
 # ---------------------------------------------------------------------------
 
 _raw_url = (
@@ -32,8 +44,13 @@ connect_args: dict = {}
 if is_postgres:
     connect_args = {
         "ssl": "require",
-        "statement_cache_size": 0,  # required for pgBouncer / Supabase pooler
+        "statement_cache_size": 0,  # required for Supabase pgBouncer pooler
     }
+
+if is_postgres:
+    logger.info("[db] Using PostgreSQL (Supabase)")
+else:
+    logger.info("[db] Using SQLite (local dev fallback)")
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -50,7 +67,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def _migrate_add_columns():
     """Safely add new columns to existing tables without dropping data."""
-    # Use dialect-correct JSON type
     json_type = "JSONB" if is_postgres else "TEXT"
     new_columns = [
         ("runs", "scenarios_yaml", "TEXT"),
@@ -86,8 +102,6 @@ async def _migrate_add_columns():
 
 async def init_db():
     """Create all tables on startup, then apply safe column migrations."""
-    db_label = "Supabase (PostgreSQL)" if is_postgres else "SQLite (local)"
-    logger.info("[db] Connecting to %s", db_label)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _migrate_add_columns()
