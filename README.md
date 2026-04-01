@@ -29,7 +29,7 @@ LLM Test Lab is an open-source evaluation platform for AI applications. Run your
 llm-test-lab/
 ├── landing/            # Next.js landing page (Vercel)
 ├── apps/
-│   ├── backend/        # FastAPI scoring engine + REST API (Railway / Render)
+│   ├── backend/        # FastAPI scoring engine + REST API (Render)
 │   └── frontend/       # Main app: auth, dashboard, run history (Vercel)
 ├── packages/
 │   ├── core-python/    # Shared Python models + judges
@@ -37,6 +37,13 @@ llm-test-lab/
 ├── cli/                # llm_eval.py — CI integration script
 └── .github/workflows/  # CI: unit tests + LLM eval on every push
 ```
+
+**Deployment stack:**
+| Layer | Host |
+|---|---|
+| Frontend (Next.js) | Vercel |
+| Backend (FastAPI) | Render |
+| Database | Supabase (PostgreSQL) |
 
 ---
 
@@ -47,7 +54,7 @@ llm-test-lab/
 cd apps/backend
 pip install -r requirements.txt
 cp .env.example .env
-# Fill in GROQ_API_KEY, SUPABASE_DB_URL (or leave blank for SQLite locally)
+# Fill in GROQ_API_KEY + SUPABASE_DB_URL (or leave blank for SQLite locally)
 uvicorn app.main:app --reload
 ```
 
@@ -56,11 +63,10 @@ uvicorn app.main:app --reload
 cd apps/frontend
 npm install
 cp .env.example .env.local
-# Add NEXT_PUBLIC_API_URL pointing to your backend
 npm run dev
 ```
 
-### Run tests
+### Run unit tests
 ```bash
 pip install pytest
 pytest apps/backend/tests/ -v
@@ -70,26 +76,44 @@ pytest apps/backend/tests/ -v
 
 ## 🔑 Environment Variables
 
-### Backend (`apps/backend/.env`)
+### ⚡ Important: two different Supabase variable types
+
+| Variable | Used by | What it is |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Frontend (Vercel / Render) | Your Supabase project URL — safe to expose |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend (Vercel / Render) | Supabase anon key for the JS client — safe to expose |
+| `SUPABASE_DB_URL` | **Backend (Render)** | Direct PostgreSQL connection string — **keep secret** |
+
+The backend does **not** use the anon key. It connects directly to Postgres via SQLAlchemy. Set `SUPABASE_DB_URL` in Render > your backend service > Environment.
+
+### Backend env vars (Render service)
 
 | Variable | Required | Description |
 |---|---|---|
 | `GROQ_API_KEY` | ✅ | [console.groq.com](https://console.groq.com) |
-| `SUPABASE_DB_URL` | ✅ prod | Supabase connection string (PostgreSQL) — e.g. `postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres` |
-| `DATABASE_URL` | — | Overrides `SUPABASE_DB_URL` (Railway auto-injects this) |
-| `CORS_ALLOWED_ORIGINS` | ✅ prod | Comma-separated allowed origins e.g. `https://your-app.vercel.app` |
+| `SUPABASE_DB_URL` | ✅ | Supabase connection string: `postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres` |
+| `SECRET_KEY` | ✅ | Random string for JWT signing — generate with `openssl rand -hex 32` |
+| `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated: `https://llm-test-lab-psi.vercel.app,https://your-app.vercel.app` |
 | `RESEND_API_KEY` | optional | [resend.com](https://resend.com) — enables email score alerts |
 | `FROM_EMAIL` | optional | Sender address for alerts (default: `onboarding@resend.dev`) |
 | `APP_URL` | optional | Your frontend URL, used in alert email links |
 
-> **Local dev:** If `SUPABASE_DB_URL` and `DATABASE_URL` are both unset, the backend falls back to SQLite (`llm_test_lab.db`). No setup needed.
+> **Local dev:** If `SUPABASE_DB_URL` is not set, the backend falls back to `llm_test_lab.db` (SQLite). No setup needed.
 
-### CI (GitHub Actions secrets + variables)
+### Frontend env vars (Vercel)
 
-| Name | Type | Description |
-|---|---|---|
-| `LLM_TEST_LAB_TOKEN` | Secret | API token from your LLM Test Lab dashboard |
-| `LLM_TEST_LAB_API_URL` | Variable | Your deployed backend URL, e.g. `https://llm-test-lab.onrender.com` |
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | Your Render backend URL e.g. `https://llm-test-lab.onrender.com` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+
+### CI (GitHub Actions)
+
+| Name | Type | Where to add | Description |
+|---|---|---|---|
+| `LLM_TEST_LAB_TOKEN` | Secret | Settings → Secrets → Actions | API token from your LLM Test Lab dashboard |
+| `LLM_TEST_LAB_API_URL` | Variable | Settings → Variables → Actions | Your Render backend URL |
 
 ---
 
@@ -117,7 +141,7 @@ pytest apps/backend/tests/ -v
 | Layer | Tech |
 |---|---|
 | **Frontend** | Next.js, TypeScript, Tailwind CSS, Vercel |
-| **Backend** | FastAPI, Python 3.11, SQLAlchemy (asyncpg) |
+| **Backend** | FastAPI, Python 3.11, SQLAlchemy (asyncpg), Render |
 | **Database** | Supabase (PostgreSQL) — SQLite for local dev |
 | **AI / Judges** | Groq (Llama 3.1, 3.3), sentence-transformers |
 | **Auth** | JWT (python-jose + bcrypt) |
