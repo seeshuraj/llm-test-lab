@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from .auth import router as auth_router, get_current_user
+from .notifications import router as notifications_router
 from .api_keys import router as api_keys_router
 from .db import get_db, init_db
 from .models import Run, RunScenarioResult, User
@@ -35,6 +36,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix="/api/auth")
 app.include_router(api_keys_router, prefix="/api/keys")
+app.include_router(notifications_router)
 
 DEFAULT_RUBRIC = (
     "Score the answer based on correctness and grounding in the provided context. "
