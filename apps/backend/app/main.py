@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
 from .auth import router as auth_router, get_current_user
-from .notifications import router as notifications_router
+from .notifications import router as notifications_router, check_and_notify
 from .api_keys import router as api_keys_router
 from .db import get_db, init_db
 from .models import Run, RunScenarioResult, User
@@ -26,9 +26,17 @@ from llm_test_lab.runner_local import run_suite
 
 app = FastAPI(title="LLM Test Lab API")
 
+# ---------------------------------------------------------------------------
+# CORS — restrict origins via env var in production
+# Set CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+# Defaults to * for local dev only
+# ---------------------------------------------------------------------------
+_raw_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
+_ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -276,6 +284,22 @@ async def run_local(
         ))
 
     await db.commit()
+
+    # Fire email notification if score drops below user threshold
+    avg_score_val = sum(r.score for r in run_result.results) / len(run_result.results) if run_result.results else 0.0
+    try:
+        await check_and_notify(
+            user_id=current_user.id,
+            user_email=current_user.email,
+            project=req.project,
+            run_id=run_id,
+            avg_score=avg_score_val,
+            db=db,
+        )
+    except Exception as e:
+        # Notification failure must never crash the run response
+        print(f"[main] notification error (non-fatal): {e}")
+
     return await _build_run_out(db_run, run_result.results)
 
 
