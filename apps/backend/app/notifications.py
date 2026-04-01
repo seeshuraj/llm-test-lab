@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from .auth import get_current_user
 from .db import get_db
+from .models import User
 
 router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
@@ -36,24 +37,24 @@ async def _ensure_table(db: AsyncSession):
 
 @router.get("/settings", response_model=NotificationSettingsOut)
 async def get_settings(
-    user=Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     await _ensure_table(db)
     result = await db.execute(
         text("SELECT email, threshold, enabled FROM notification_settings WHERE user_id=:uid"),
-        {"uid": user["id"]}
+        {"uid": user.id}
     )
     row = result.fetchone()
     if not row:
-        return NotificationSettingsOut(email=user["email"], threshold=0.7, enabled=True)
+        return NotificationSettingsOut(email=user.email, threshold=0.7, enabled=True)
     return NotificationSettingsOut(email=row[0], threshold=row[1], enabled=bool(row[2]))
 
 
 @router.post("/settings", response_model=NotificationSettingsOut)
 async def save_settings(
     body: NotificationSettings,
-    user=Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     await _ensure_table(db)
@@ -64,23 +65,23 @@ async def save_settings(
             email=excluded.email,
             threshold=excluded.threshold,
             enabled=excluded.enabled
-    """), {"uid": user["id"], "email": body.email, "threshold": body.threshold, "enabled": int(body.enabled)})
+    """), {"uid": user.id, "email": body.email, "threshold": body.threshold, "enabled": int(body.enabled)})
     await db.commit()
     return NotificationSettingsOut(email=body.email, threshold=body.threshold, enabled=body.enabled)
 
 
 @router.post("/test")
 async def send_test_email(
-    user=Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     await _ensure_table(db)
     result = await db.execute(
         text("SELECT email FROM notification_settings WHERE user_id=:uid"),
-        {"uid": user["id"]}
+        {"uid": user.id}
     )
     row = result.fetchone()
-    email = row[0] if row else user["email"]
+    email = row[0] if row else user.email
     ok = _send_alert_email(
         to=email,
         project="test-project",
@@ -108,7 +109,13 @@ def _send_alert_email(to: str, project: str, run_id: str, avg_score: float, thre
                 "from": from_email,
                 "to": [to],
                 "subject": f"[LLM Test Lab] Alert: {project} score dropped to {avg_score:.2f}",
-                "html": f"<h2>Score Alert</h2><p>Project <strong>{project}</strong> scored <strong style='color:red'>{avg_score:.2f}</strong>, below threshold {threshold}.</p><p><a href='{app_url}/runs/{run_id}'>View Results</a></p>"
+                "html": (
+                    f"<h2>Score Alert</h2>"
+                    f"<p>Project <strong>{project}</strong> scored "
+                    f"<strong style='color:red'>{avg_score:.2f}</strong>, "
+                    f"below threshold {threshold}.</p>"
+                    f"<p><a href='{app_url}/runs/{run_id}'>View Results</a></p>"
+                )
             },
             timeout=10
         )
@@ -118,7 +125,14 @@ def _send_alert_email(to: str, project: str, run_id: str, avg_score: float, thre
         return False
 
 
-async def check_and_notify(user_id: str, user_email: str, project: str, run_id: str, avg_score: float, db: AsyncSession):
+async def check_and_notify(
+    user_id: str,
+    user_email: str,
+    project: str,
+    run_id: str,
+    avg_score: float,
+    db: AsyncSession
+):
     """Called after every run to auto-alert if score < threshold."""
     await _ensure_table(db)
     result = await db.execute(
