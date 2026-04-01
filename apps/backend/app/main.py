@@ -15,7 +15,7 @@ from sqlalchemy import select, delete
 from .auth import router as auth_router, get_current_user
 from .notifications import router as notifications_router, check_and_notify
 from .api_keys import router as api_keys_router
-from .db import get_db, init_db
+from .db import get_db, init_db, AsyncSessionLocal
 from .models import Run, RunScenarioResult, User
 from .rag_metrics import compute_rag_metrics
 
@@ -285,17 +285,22 @@ async def run_local(
 
     await db.commit()
 
-    # Fire email notification if score drops below user threshold
-    avg_score_val = sum(r.score for r in run_result.results) / len(run_result.results) if run_result.results else 0.0
+    # Fire email notification using a FRESH session — never reuse the
+    # already-committed request session (causes asyncpg InterfaceError → 500)
+    avg_score_val = (
+        sum(r.score for r in run_result.results) / len(run_result.results)
+        if run_result.results else 0.0
+    )
     try:
-        await check_and_notify(
-            user_id=current_user.id,
-            user_email=current_user.email,
-            project=req.project,
-            run_id=run_id,
-            avg_score=avg_score_val,
-            db=db,
-        )
+        async with AsyncSessionLocal() as notify_db:
+            await check_and_notify(
+                user_id=current_user.id,
+                user_email=current_user.email,
+                project=req.project,
+                run_id=run_id,
+                avg_score=avg_score_val,
+                db=notify_db,
+            )
     except Exception as e:
         # Notification failure must never crash the run response
         print(f"[main] notification error (non-fatal): {e}")

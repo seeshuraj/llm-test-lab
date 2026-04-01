@@ -24,12 +24,16 @@ class NotificationSettingsOut(BaseModel):
 
 
 async def _ensure_table(db: AsyncSession):
+    """Create notification_settings if it doesn't exist.
+    Uses BOOLEAN for Postgres compatibility (asyncpg returns Python bools,
+    not integers, for BOOLEAN columns).
+    """
     await db.execute(text("""
         CREATE TABLE IF NOT EXISTS notification_settings (
             user_id TEXT PRIMARY KEY,
             email TEXT NOT NULL,
             threshold REAL NOT NULL DEFAULT 0.7,
-            enabled INTEGER NOT NULL DEFAULT 1
+            enabled BOOLEAN NOT NULL DEFAULT TRUE
         )
     """))
     await db.commit()
@@ -65,7 +69,7 @@ async def save_settings(
             email=excluded.email,
             threshold=excluded.threshold,
             enabled=excluded.enabled
-    """), {"uid": user.id, "email": body.email, "threshold": body.threshold, "enabled": int(body.enabled)})
+    """), {"uid": user.id, "email": body.email, "threshold": body.threshold, "enabled": body.enabled})
     await db.commit()
     return NotificationSettingsOut(email=body.email, threshold=body.threshold, enabled=body.enabled)
 
@@ -133,7 +137,7 @@ async def check_and_notify(
     avg_score: float,
     db: AsyncSession
 ):
-    """Called after every run to auto-alert if score < threshold."""
+    """Called after every run to auto-alert if score < user threshold."""
     await _ensure_table(db)
     result = await db.execute(
         text("SELECT email, threshold, enabled FROM notification_settings WHERE user_id=:uid"),
@@ -146,5 +150,5 @@ async def check_and_notify(
     if not enabled:
         return
     if avg_score < threshold:
-        print(f"[notifications] Score {avg_score} < {threshold} - alerting {email}")
+        print(f"[notifications] Score {avg_score:.3f} < {threshold} — alerting {email}")
         _send_alert_email(to=email, project=project, run_id=run_id, avg_score=avg_score, threshold=threshold)

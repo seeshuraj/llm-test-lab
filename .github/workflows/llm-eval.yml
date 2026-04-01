@@ -9,7 +9,7 @@ on:
 
 jobs:
   # -------------------------------------------------------------------------
-  # Job 1: Unit tests — runs first, blocks eval if scoring logic is broken
+  # Job 1: Unit tests — self-contained, no backend deps needed
   # -------------------------------------------------------------------------
   unit-tests:
     name: 🧪 Unit Tests (scoring logic)
@@ -25,7 +25,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install test deps
-        run: pip install pytest pytest-asyncio
+        # test_scoring.py is fully self-contained (stdlib only + pytest).
+        # No SQLAlchemy/httpx/groq needed — the test file inlines its own
+        # implementations so it runs without the full backend stack.
+        run: pip install pytest
 
       - name: Run unit tests
         run: pytest apps/backend/tests/ -v
@@ -48,7 +51,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install CLI deps
-        run: pip install pyyaml requests
+        run: pip install pyyaml
 
       - name: Validate API URL is set
         run: |
