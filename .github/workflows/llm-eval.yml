@@ -75,6 +75,29 @@ jobs:
           fi
           echo "✅ Token is set (length=${#LLM_TEST_LAB_TOKEN})"
 
+      - name: Warm up test app (Render free tier cold start)
+        run: |
+          echo "Pinging test app to wake it from sleep (Render free tier spins down after 15min)..."
+          for i in 1 2 3 4 5 6; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              "https://llm-test-lab-test.onrender.com/answer" \
+              -X POST -H "Content-Type: application/json" \
+              -d '{"question":"ping"}' 2>/dev/null || echo "000")
+            echo "  Attempt $i: HTTP $STATUS"
+            # 200 = normal, 422 = app awake but bad payload (fine), 404 = awake
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ] || [ "$STATUS" = "404" ]; then
+              echo "✅ Test app is awake (HTTP $STATUS)"
+              break
+            fi
+            if [ "$i" = "6" ]; then
+              echo "⚠️  Test app did not respond after 6 attempts — evaluation may still proceed."
+            else
+              echo "  Sleeping 15s before retry..."
+              sleep 15
+            fi
+          done
+
       - name: Run LLM Test Lab evaluation
         env:
           LLM_TEST_LAB_TOKEN: ${{ secrets.LLM_TEST_LAB_TOKEN }}

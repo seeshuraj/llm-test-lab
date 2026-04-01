@@ -211,9 +211,34 @@ async def run_local(
             if context:
                 payload["context"] = context
             async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(req.app_endpoint_url, json=payload)
-                resp.raise_for_status()
-                return resp.json().get("answer", "")
+                try:
+                    resp = await client.post(req.app_endpoint_url, json=payload)
+                    resp.raise_for_status()
+                    return resp.json().get("answer", "")
+                except httpx.HTTPStatusError as e:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"App endpoint returned HTTP {e.response.status_code}. "
+                            f"URL: {req.app_endpoint_url} — "
+                            f"The target app may be sleeping (Render free tier cold start). "
+                            f"Retry in ~30s or add a warm-up step to your CI workflow."
+                        )
+                    )
+                except httpx.TimeoutException:
+                    raise HTTPException(
+                        status_code=504,
+                        detail=(
+                            f"App endpoint timed out after 30s. "
+                            f"URL: {req.app_endpoint_url} — "
+                            f"The target app may be overloaded or sleeping."
+                        )
+                    )
+                except Exception as e:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"App endpoint unreachable: {e} — URL: {req.app_endpoint_url}"
+                    )
     else:
         async def app_call(question: str, context: str = "") -> str:
             return f"Echo: {question}"
