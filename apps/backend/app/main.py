@@ -61,6 +61,11 @@ SUPPORTED_MODELS = [
     "llama-3.3-70b-versatile",
 ]
 
+# Timeout for calls to the user's app endpoint.
+# 90s default handles Render free-tier cold starts (~50s worst case).
+# Override per-deploy with APP_ENDPOINT_TIMEOUT env var.
+_APP_ENDPOINT_TIMEOUT = float(os.environ.get("APP_ENDPOINT_TIMEOUT", "90"))
+
 _user_last_run: dict[str, float] = defaultdict(float)
 _user_running: set[str] = set()
 RUN_COOLDOWN_SECONDS = 10
@@ -210,7 +215,7 @@ async def run_local(
             payload = {"question": question}
             if context:
                 payload["context"] = context
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=_APP_ENDPOINT_TIMEOUT) as client:
                 try:
                     resp = await client.post(req.app_endpoint_url, json=payload)
                     resp.raise_for_status()
@@ -229,7 +234,7 @@ async def run_local(
                     raise HTTPException(
                         status_code=504,
                         detail=(
-                            f"App endpoint timed out after 30s. "
+                            f"App endpoint timed out after {_APP_ENDPOINT_TIMEOUT}s. "
                             f"URL: {req.app_endpoint_url} — "
                             f"The target app may be overloaded or sleeping."
                         )

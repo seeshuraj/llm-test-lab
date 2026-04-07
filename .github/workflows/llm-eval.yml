@@ -25,9 +25,6 @@ jobs:
           python-version: "3.11"
 
       - name: Install test deps
-        # test_scoring.py is fully self-contained (stdlib only + pytest).
-        # No SQLAlchemy/httpx/groq needed — the test file inlines its own
-        # implementations so it runs without the full backend stack.
         run: pip install pytest
 
       - name: Run unit tests
@@ -75,9 +72,29 @@ jobs:
           fi
           echo "✅ Token is set (length=${#LLM_TEST_LAB_TOKEN})"
 
+      - name: Warm up backend API (Render free tier cold start)
+        run: |
+          echo "Pinging backend to wake it from sleep..."
+          for i in 1 2 3 4 5 6 7 8; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 30 \
+              "${{ vars.LLM_TEST_LAB_API_URL }}/health" 2>/dev/null || echo "000")
+            echo "  Attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Backend is awake"
+              break
+            fi
+            if [ "$i" = "8" ]; then
+              echo "⚠️  Backend did not respond after 8 attempts — proceeding anyway."
+            else
+              echo "  Sleeping 15s before retry..."
+              sleep 15
+            fi
+          done
+
       - name: Warm up test app (Render free tier cold start)
         run: |
-          echo "Pinging test app to wake it from sleep (Render free tier spins down after 15min)..."
+          echo "Pinging test app to wake it from sleep..."
           for i in 1 2 3 4 5 6; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               --max-time 30 \
@@ -85,7 +102,6 @@ jobs:
               -X POST -H "Content-Type: application/json" \
               -d '{"question":"ping"}' 2>/dev/null || echo "000")
             echo "  Attempt $i: HTTP $STATUS"
-            # 200 = normal, 422 = app awake but bad payload (fine), 404 = awake
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ] || [ "$STATUS" = "404" ]; then
               echo "✅ Test app is awake (HTTP $STATUS)"
               break
