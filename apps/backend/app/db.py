@@ -109,6 +109,10 @@ async def _migrate_add_columns():
         ("runs", "app_endpoint_url", "TEXT"),
         ("runs", "run_label", "VARCHAR"),
         ("run_scenario_results", "rag_scores", json_type),
+        # Guard: add key_prefix to api_keys for DBs created before this column
+        # existed. The CREATE TABLE IF NOT EXISTS above already includes it,
+        # but databases initialised before this migration need it added.
+        ("api_keys", "key_prefix", "VARCHAR" if is_postgres else "TEXT"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in new_columns:
@@ -138,7 +142,7 @@ async def _migrate_add_columns():
 async def init_db():
     """
     Called at FastAPI startup.
-    1. create_all  — creates every table in models.py that doesn’t exist yet
+    1. create_all  — creates every table in models.py that doesn't exist yet
     2. _migrate_add_tables  — explicit CREATE TABLE IF NOT EXISTS guards for
                               tables added after initial deployment
     3. _migrate_add_columns — ADD COLUMN IF NOT EXISTS for new columns

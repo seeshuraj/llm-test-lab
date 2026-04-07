@@ -95,15 +95,34 @@ async def get_current_user(
     # Path A: API key (prefix ltk_) — used by CLI / CI
     # -------------------------------------------------------------------------
     if raw_token.startswith("ltk_"):
+        # Fast path: use the stored key_prefix to narrow to at most 1 candidate
+        # before running bcrypt (which is intentionally slow ~100ms/check).
+        # The first 12 chars of the raw key are stored as key_prefix on creation.
+        # This reduces bcrypt calls from O(n_keys) → O(1) in the common case.
+        prefix = raw_token[:12]
+
         res = await db.execute(
             select(models.ApiKey).where(
-                models.ApiKey.revoked.is_(False)  # correct SQLAlchemy boolean filter
+                models.ApiKey.revoked.is_(False),
+                models.ApiKey.key_prefix == prefix,
             )
         )
-        all_keys = res.scalars().all()
+        candidates = res.scalars().all()
+
+        # Fallback: handle legacy keys that pre-date the key_prefix column
+        # (key_prefix is NULL for keys created before this migration).
+        # Once all old keys are rotated, this branch can be removed.
+        if not candidates:
+            res2 = await db.execute(
+                select(models.ApiKey).where(
+                    models.ApiKey.revoked.is_(False),
+                    models.ApiKey.key_prefix.is_(None),
+                )
+            )
+            candidates = res2.scalars().all()
 
         matched_key = None
-        for k in all_keys:
+        for k in candidates:
             try:
                 if bcrypt.checkpw(raw_token.encode("utf-8"), k.key_hash.encode("utf-8")):
                     matched_key = k
@@ -116,7 +135,7 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=(
                     "API key not found or revoked. "
-                    "Generate a new key at Settings → API Keys in the LLM Test Lab dashboard."
+                    "Generate a new key at Settings \u2192 API Keys in the LLM Test Lab dashboard."
                 ),
                 headers={"WWW-Authenticate": "Bearer"},
             )

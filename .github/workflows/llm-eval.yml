@@ -9,7 +9,7 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Job 1: Unit tests — pure Python, no network, no backend deps beyond pytest
+  # Job 1: Unit tests — pure Python, no network, no Groq calls
   # ---------------------------------------------------------------------------
   unit-tests:
     name: 🧪 Unit Tests (scoring logic)
@@ -25,7 +25,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install test deps
-        run: pip install pytest
+        run: |
+          pip install pytest numpy
+          pip install -e packages/core-python
+          pip install -e packages/sdk-python
 
       - name: Run unit tests
         run: pytest apps/backend/tests/ -v --tb=short
@@ -78,8 +81,9 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Step 1: Wake the TEST APP first — this is what the backend calls
-      # during evaluation. If it’s cold when the eval fires, backend returns 502.
+      # during evaluation. If it's cold when the eval fires, backend returns 502.
       # Must be READY before we even touch the backend.
+      # HTTP 500 during warm-up = Render worker still booting — keep retrying.
       # -----------------------------------------------------------------------
       - name: ⏳ Warm up test app (llm-test-lab-test.onrender.com)
         run: |
@@ -99,13 +103,19 @@ jobs:
               READY=1
               break
             fi
+            # 500 during boot = Render worker initialising, not a hard failure — retry
+            if [ "$STATUS" = "500" ]; then
+              echo "  ⚠️  HTTP 500 — Render worker still booting, will retry..."
+            elif [ "$STATUS" = "000" ]; then
+              echo "  💤 No connection yet..."
+            fi
             if [ "$i" != "14" ]; then
-              echo "  💤 Sleeping 15s before retry..."
+              echo "  Sleeping 15s before retry..."
               sleep 15
             fi
           done
           if [ "$READY" = "0" ]; then
-            echo "❌ Test app never responded after ~3.5 minutes."
+            echo "❌ Test app never became ready after ~3.5 minutes."
             echo "   Check: https://dashboard.render.com → llm-test-lab-test service"
             echo "   The service may be suspended or have a startup error."
             exit 1
@@ -129,7 +139,7 @@ jobs:
               break
             fi
             if [ "$i" != "10" ]; then
-              echo "  💤 Sleeping 15s before retry..."
+              echo "  Sleeping 15s before retry..."
               sleep 15
             fi
           done
@@ -140,7 +150,7 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # Step 3: Settle pause — both services are awake but give them a moment
+      # Step 3: Settle pause — both services are awake; give them a moment
       # to finish any remaining initialisation (DB migrations, etc.)
       # -----------------------------------------------------------------------
       - name: ⏳ Settle pause (5s)
