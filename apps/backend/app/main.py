@@ -52,7 +52,7 @@ DEFAULT_RUBRIC = (
     "(1) If the context contains relevant information, the answer must use it accurately — score high for correct grounding, low for contradictions or hallucinations. "
     "(2) If the context does NOT contain relevant information for the question, a correct refusal such as "
     "'I don't know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
-    "(3) If the context is irrelevant but the model answers correctly from general knowledge, score 0.3–0.5 — the answer may be factually right but it is not grounded. "
+    "(3) If the context is irrelevant but the model answers correctly from general knowledge, score 0.3-0.5 — the answer may be factually right but it is not grounded. "
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
@@ -134,6 +134,11 @@ class RunOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 async def _build_run_out(run: Run, results: list) -> RunOut:
+    """Build RunOut from a Run ORM object + list of RunScenarioResult ORM objects.
+
+    IMPORTANT: `results` must be RunScenarioResult DB rows, NOT runner ScenarioResult
+    objects. Runner objects don't have .rag_scores and will raise AttributeError.
+    """
     avg = sum(r.score for r in results) / len(results) if results else 0.0
     return RunOut(
         run_id=run.id,
@@ -146,15 +151,18 @@ async def _build_run_out(run: Run, results: list) -> RunOut:
         scenarios_yaml=run.scenarios_yaml,
         rubric=run.rubric,
         app_endpoint_url=run.app_endpoint_url,
-        results=[ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-            rag_scores=r.rag_scores,
-        ) for r in results],
+        results=[
+            ScenarioResultOut(
+                scenario_id=r.scenario_id,
+                variant_id=r.variant_id,
+                score=r.score,
+                reason=r.reason,
+                latency_ms=r.latency_ms,
+                judge_model=r.judge_model,
+                rag_scores=r.rag_scores,
+            )
+            for r in results
+        ],
     )
 
 
@@ -168,8 +176,8 @@ async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> 
     res_result = await db.execute(
         select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
     )
-    results = res_result.scalars().all()
-    return await _build_run_out(run, results)
+    db_results = res_result.scalars().all()
+    return await _build_run_out(run, db_results)
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +233,7 @@ async def run_local(
                         status_code=502,
                         detail=(
                             f"App endpoint returned HTTP {e.response.status_code}. "
-                            f"URL: {req.app_endpoint_url} — "
+                            f"URL: {req.app_endpoint_url} - "
                             f"The target app may be sleeping (Render free tier cold start). "
                             f"Retry in ~30s or add a warm-up step to your CI workflow."
                         )
@@ -235,14 +243,14 @@ async def run_local(
                         status_code=504,
                         detail=(
                             f"App endpoint timed out after {_APP_ENDPOINT_TIMEOUT}s. "
-                            f"URL: {req.app_endpoint_url} — "
+                            f"URL: {req.app_endpoint_url} - "
                             f"The target app may be overloaded or sleeping."
                         )
                     )
                 except Exception as e:
                     raise HTTPException(
                         status_code=502,
-                        detail=f"App endpoint unreachable: {e} — URL: {req.app_endpoint_url}"
+                        detail=f"App endpoint unreachable: {e} - URL: {req.app_endpoint_url}"
                     )
     else:
         async def app_call(question: str, context: str = "") -> str:
@@ -280,6 +288,7 @@ async def run_local(
     )
     db.add(db_run)
 
+    db_scenario_results = []
     for r in run_result.results:
         rag_scores_dict = None
         if req.enable_rag_metrics:
@@ -302,7 +311,7 @@ async def run_local(
                 except Exception:
                     rag_scores_dict = None
 
-        db.add(RunScenarioResult(
+        db_row = RunScenarioResult(
             run_id=run_id,
             scenario_id=r.scenario_id,
             variant_id=r.variant_id,
@@ -311,12 +320,16 @@ async def run_local(
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
             rag_scores=rag_scores_dict,
-        ))
+        )
+        db.add(db_row)
+        db_scenario_results.append(db_row)
 
     await db.commit()
+    # Refresh db_run so ORM fields like created_at are populated from the DB
+    await db.refresh(db_run)
 
     # Fire email notification using a FRESH session — never reuse the
-    # already-committed request session (causes asyncpg InterfaceError → 500)
+    # already-committed request session (causes asyncpg InterfaceError -> 500)
     avg_score_val = (
         sum(r.score for r in run_result.results) / len(run_result.results)
         if run_result.results else 0.0
@@ -335,7 +348,8 @@ async def run_local(
         # Notification failure must never crash the run response
         print(f"[main] notification error (non-fatal): {e}")
 
-    return await _build_run_out(db_run, run_result.results)
+    # Pass DB rows (have .rag_scores) — NOT runner result objects
+    return await _build_run_out(db_run, db_scenario_results)
 
 
 @app.patch("/api/runs/{run_id}/label", response_model=RunOut)
@@ -370,7 +384,7 @@ async def rerun(
     if not original:
         raise HTTPException(status_code=404, detail="Run not found")
     if not original.scenarios_yaml:
-        raise HTTPException(status_code=400, detail="Original run has no stored YAML — cannot re-run")
+        raise HTTPException(status_code=400, detail="Original run has no stored YAML - cannot re-run")
 
     model = original.model_name if original.model_name in SUPPORTED_MODELS else SUPPORTED_MODELS[0]
 
@@ -402,8 +416,8 @@ async def list_runs(
         res_result = await db.execute(
             select(RunScenarioResult).where(RunScenarioResult.run_id == run.id)
         )
-        results = res_result.scalars().all()
-        out.append(await _build_run_out(run, results))
+        db_results = res_result.scalars().all()
+        out.append(await _build_run_out(run, db_results))
     return out
 
 
@@ -434,7 +448,7 @@ async def delete_run(
 
 
 # ---------------------------------------------------------------------------
-# Public share route — NO auth required
+# Public share route - NO auth required
 # ---------------------------------------------------------------------------
 
 @app.get("/api/share/{run_id}", response_model=RunOut)
@@ -449,8 +463,8 @@ async def get_shared_run(
     res_result = await db.execute(
         select(RunScenarioResult).where(RunScenarioResult.run_id == run_id)
     )
-    results = res_result.scalars().all()
-    return await _build_run_out(run, results)
+    db_results = res_result.scalars().all()
+    return await _build_run_out(run, db_results)
 
 
 @app.get("/health")
