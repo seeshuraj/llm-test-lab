@@ -17,10 +17,6 @@ logger = logging.getLogger(__name__)
 #   SUPABASE_DB_URL   — Supabase connection string, e.g.
 #                        postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres
 #
-# NOTE: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are
-#       frontend-only variables for the JS Supabase client. The backend uses
-#       a direct PostgreSQL connection string — not the anon key.
-#
 # Falls back to SQLite for local dev when neither is set.
 # ---------------------------------------------------------------------------
 
@@ -32,7 +28,7 @@ _raw_url = (
 
 DATABASE_URL: str = _raw_url
 
-# Normalise Supabase / Heroku postgres:// → postgresql+asyncpg://
+# Normalise postgres:// → postgresql+asyncpg://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
@@ -48,9 +44,9 @@ if is_postgres:
     }
 
 if is_postgres:
-    logger.info("[db] Using PostgreSQL (Supabase)")
+    logger.info("[db] Driver: PostgreSQL/asyncpg")
 else:
-    logger.info("[db] Using SQLite (local dev fallback)")
+    logger.info("[db] Driver: SQLite/aiosqlite (local dev fallback)")
 
 engine = create_async_engine(
     DATABASE_URL,
@@ -63,6 +59,45 @@ AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
+
+
+async def _migrate_add_tables():
+    """
+    Belt-and-suspenders: explicitly CREATE TABLE IF NOT EXISTS for any table
+    that was added after the initial DB deployment.
+
+    SQLAlchemy's create_all is idempotent for *existing* tables but it WON'T
+    add a table that was defined in models.py *after* the DB was first
+    initialised. This guard ensures those tables always exist.
+    """
+    async with engine.begin() as conn:
+        if is_postgres:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id          VARCHAR PRIMARY KEY,
+                    user_id     VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name        VARCHAR NOT NULL,
+                    key_hash    VARCHAR NOT NULL UNIQUE,
+                    key_prefix  VARCHAR NOT NULL,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    last_used_at TIMESTAMPTZ,
+                    revoked     BOOLEAN NOT NULL DEFAULT FALSE
+                )
+            """))
+        else:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id           TEXT PRIMARY KEY,
+                    user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name         TEXT NOT NULL,
+                    key_hash     TEXT NOT NULL UNIQUE,
+                    key_prefix   TEXT NOT NULL,
+                    created_at   DATETIME NOT NULL,
+                    last_used_at DATETIME,
+                    revoked      INTEGER NOT NULL DEFAULT 0
+                )
+            """))
+        logger.info("[db] api_keys table ensured")
 
 
 async def _migrate_add_columns():
@@ -101,8 +136,22 @@ async def _migrate_add_columns():
 
 
 async def init_db():
-    """Create all tables on startup, then apply safe column migrations."""
+    """
+    Called at FastAPI startup.
+    1. create_all  — creates every table in models.py that doesn’t exist yet
+    2. _migrate_add_tables  — explicit CREATE TABLE IF NOT EXISTS guards for
+                              tables added after initial deployment
+    3. _migrate_add_columns — ADD COLUMN IF NOT EXISTS for new columns
+    """
+    # Step 1: create all ORM-defined tables (idempotent)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("[db] create_all complete")
+
+    # Step 2: explicit table guards (catches tables added post-deployment)
+    await _migrate_add_tables()
+
+    # Step 3: column migrations
     await _migrate_add_columns()
+
     logger.info("[db] Schema ready")
