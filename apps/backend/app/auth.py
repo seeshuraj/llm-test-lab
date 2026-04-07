@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
-from .db import get_db
+from .db import get_db, AsyncSessionLocal
 from . import models
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-this-to-a-random-secret-in-production")
@@ -50,6 +50,24 @@ def create_access_token(user_id: str) -> str:
     return jwt.encode({"sub": user_id, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
+async def _update_key_last_used(key_id: str) -> None:
+    """Fire-and-forget: update last_used_at in a fresh session.
+    Called with asyncio.create_task so it never blocks or crashes the request.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(models.ApiKey).where(models.ApiKey.id == key_id)
+            )
+            key = res.scalars().first()
+            if key:
+                key.last_used_at = datetime.now(timezone.utc)
+                await db.commit()
+    except Exception as e:
+        # Non-fatal — just log and swallow
+        print(f"[auth] last_used_at update failed (non-fatal): {e}")
+
+
 async def get_current_user(
     request: Request,
     token: str = Depends(oauth2_scheme),
@@ -63,36 +81,61 @@ async def get_current_user(
 
     # Extract raw token from Authorization header
     auth_header = request.headers.get("Authorization", "")
-    raw_token = ""
-    if auth_header.startswith("Bearer "):
-        raw_token = auth_header[7:]
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed Authorization header. Expected: Bearer <token>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    raw_token = auth_header[7:].strip()
+    if not raw_token:
+        raise credentials_exception
 
-    # --- Try API key first (prefix: ltk_) ---
+    # -------------------------------------------------------------------------
+    # Path A: API key (prefix ltk_) — used by CLI / CI
+    # -------------------------------------------------------------------------
     if raw_token.startswith("ltk_"):
         res = await db.execute(
             select(models.ApiKey).where(
-                models.ApiKey.revoked == False
+                models.ApiKey.revoked.is_(False)  # correct SQLAlchemy boolean filter
             )
         )
         all_keys = res.scalars().all()
+
         matched_key = None
         for k in all_keys:
-            if bcrypt.checkpw(raw_token.encode("utf-8"), k.key_hash.encode("utf-8")):
-                matched_key = k
-                break
+            try:
+                if bcrypt.checkpw(raw_token.encode("utf-8"), k.key_hash.encode("utf-8")):
+                    matched_key = k
+                    break
+            except Exception:
+                continue  # malformed hash row — skip safely
+
         if not matched_key:
-            raise credentials_exception
-        # Update last_used_at
-        matched_key.last_used_at = datetime.now(timezone.utc)
-        await db.commit()
-        # Load user
-        user_res = await db.execute(select(models.User).where(models.User.id == matched_key.user_id))
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "API key not found or revoked. "
+                    "Generate a new key at Settings → API Keys in the LLM Test Lab dashboard."
+                ),
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Update last_used_at in background — NEVER commit on the request session
+        import asyncio
+        asyncio.create_task(_update_key_last_used(matched_key.id))
+
+        user_res = await db.execute(
+            select(models.User).where(models.User.id == matched_key.user_id)
+        )
         user = user_res.scalars().first()
         if not user:
             raise credentials_exception
         return user
 
-    # --- Fall back to JWT ---
+    # -------------------------------------------------------------------------
+    # Path B: JWT — used by the web dashboard
+    # -------------------------------------------------------------------------
     if not token:
         raise credentials_exception
     try:
