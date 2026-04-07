@@ -55,3 +55,7 @@ htmlcov/
 # Build artefacts
 *.whl
 *.tar.gz
+*.egg-info/
+
+# Compiled Python
+*.pyc

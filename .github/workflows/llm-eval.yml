@@ -26,11 +26,15 @@ jobs:
 
       - name: Install test deps
         run: |
-          pip install pytest numpy
+          pip install pytest pytest-asyncio numpy pyyaml
           pip install -e packages/core-python
           pip install -e packages/sdk-python
 
       - name: Run unit tests
+        # PYTHONPATH=. ensures "from apps.backend.app.rag_metrics import ..."
+        # resolves from the repo root without installing the full backend.
+        env:
+          PYTHONPATH: "."
         run: pytest apps/backend/tests/ -v --tb=short
 
   # ---------------------------------------------------------------------------
@@ -97,15 +101,14 @@ jobs:
               -d '{"question":"ping"}' \
               "https://llm-test-lab-test.onrender.com/answer" 2>/dev/null || echo "000")
             echo "  Attempt $i/14: HTTP $STATUS"
-            # 200 = fully ready, 422 = app is up but wrong payload shape — both mean alive
+            # 200 = fully ready; 422 = app alive but wrong payload shape — both mean awake
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ]; then
               echo "✅ Test app is ready (HTTP $STATUS)"
               READY=1
               break
             fi
-            # 500 during boot = Render worker initialising, not a hard failure — retry
             if [ "$STATUS" = "500" ]; then
-              echo "  ⚠️  HTTP 500 — Render worker still booting, will retry..."
+              echo "  ⚠️  HTTP 500 — Render worker still booting, retrying..."
             elif [ "$STATUS" = "000" ]; then
               echo "  💤 No connection yet..."
             fi
@@ -150,8 +153,7 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # Step 3: Settle pause — both services are awake; give them a moment
-      # to finish any remaining initialisation (DB migrations, etc.)
+      # Step 3: Settle pause — both services awake; allow DB migrations to finish
       # -----------------------------------------------------------------------
       - name: ⏳ Settle pause (5s)
         run: sleep 5
