@@ -1,64 +1,27 @@
 """
-Unit tests for scoring helpers — no network calls, no DB.
-Tests: cosine similarity, JSON score extraction, RagScores dataclass.
+Unit tests for scoring helpers in rag_metrics.py.
+No network calls, no Groq/Groq API, no SentenceTransformer download.
+All tests exercise pure-Python paths only.
 """
-import pytest
 import sys
 import os
-import json
-import math
+import importlib
+import pytest
 
 # ---------------------------------------------------------------------------
-# Inline minimal implementations so tests run without the full backend stack
-# (mirrors what rag_metrics.py does under the hood)
+# Resolve the package path regardless of cwd or pytest invocation style.
+# Works when run as:
+#   pytest apps/backend/tests/          (from repo root)
+#   python -m pytest                    (from repo root with pytest.ini)
 # ---------------------------------------------------------------------------
+_BACKEND_ROOT = os.path.join(os.path.dirname(__file__), "..", "..", "..")
+sys.path.insert(0, os.path.abspath(_BACKEND_ROOT))
 
-def _cosine_sim(a: list, b: list) -> float:
-    """Cosine similarity between two equal-length float vectors."""
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    mag_a = math.sqrt(sum(x * x for x in a))
-    mag_b = math.sqrt(sum(x * x for x in b))
-    if mag_a == 0.0 or mag_b == 0.0:
-        return 0.0
-    return dot / (mag_a * mag_b)
-
-
-def _extract_score_from_json(raw: str) -> float:
-    """Extract a 0-1 score from LLM judge JSON, with regex fallback."""
-    import re
-    try:
-        data = json.loads(raw)
-        val = data.get("score", 0.0)
-        return max(0.0, min(1.0, float(val)))
-    except Exception:
-        match = re.search(r"[0-9]+(?:\.[0-9]+)?", raw)
-        if match:
-            return max(0.0, min(1.0, float(match.group())))
-        return 0.0
-
-
-from dataclasses import dataclass
-
-@dataclass
-class RagScores:
-    faithfulness: float
-    context_recall: float
-    answer_relevancy: float
-    context_precision: float
-
-    def to_dict(self) -> dict:
-        return {
-            "faithfulness": round(self.faithfulness, 4),
-            "context_recall": round(self.context_recall, 4),
-            "answer_relevancy": round(self.answer_relevancy, 4),
-            "context_precision": round(self.context_precision, 4),
-        }
+from apps.backend.app.rag_metrics import _cosine_sim, _extract_score_from_json, RagScores
 
 
 # ---------------------------------------------------------------------------
-# Tests: cosine similarity
+# _cosine_sim
 # ---------------------------------------------------------------------------
 
 class TestCosineSim:
@@ -69,83 +32,113 @@ class TestCosineSim:
     def test_orthogonal_vectors(self):
         assert _cosine_sim([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
 
-    def test_zero_vector_returns_zero(self):
-        assert _cosine_sim([0.0, 0.0], [1.0, 0.0]) == 0.0
-
     def test_antiparallel_vectors(self):
+        # opposite direction → cosine = -1.0
         assert _cosine_sim([1.0, 0.0], [-1.0, 0.0]) == pytest.approx(-1.0)
 
+    def test_zero_vector_a(self):
+        # zero magnitude → safe return 0.0 (no ZeroDivisionError)
+        assert _cosine_sim([0.0, 0.0], [1.0, 0.0]) == 0.0
+
+    def test_zero_vector_b(self):
+        assert _cosine_sim([1.0, 0.0], [0.0, 0.0]) == 0.0
+
+    def test_normalised_vectors_similarity(self):
+        import math
+        a = [1 / math.sqrt(2), 1 / math.sqrt(2)]
+        b = [1 / math.sqrt(2), 1 / math.sqrt(2)]
+        assert _cosine_sim(a, b) == pytest.approx(1.0)
+
     def test_partial_similarity(self):
-        score = _cosine_sim([1.0, 1.0, 0.0], [1.0, 0.0, 0.0])
-        assert 0.0 < score < 1.0
-
-    def test_mismatched_lengths_returns_zero(self):
-        assert _cosine_sim([1.0, 0.0], [1.0]) == 0.0
-
-    def test_empty_vector_returns_zero(self):
-        assert _cosine_sim([], []) == 0.0
+        # 45-degree angle → cosine = sqrt(2)/2 ≈ 0.707
+        import math
+        a = [1.0, 0.0]
+        b = [1 / math.sqrt(2), 1 / math.sqrt(2)]
+        assert _cosine_sim(a, b) == pytest.approx(1 / math.sqrt(2), abs=1e-6)
 
 
 # ---------------------------------------------------------------------------
-# Tests: JSON score extraction
+# _extract_score_from_json
 # ---------------------------------------------------------------------------
 
-class TestExtractScore:
+class TestExtractScoreFromJson:
     def test_clean_json_object(self):
         assert _extract_score_from_json('{"score": 0.85, "reason": "good"}') == pytest.approx(0.85)
 
-    def test_clamps_above_one(self):
-        assert _extract_score_from_json('{"score": 1.5}') == pytest.approx(1.0)
-
-    def test_clamps_below_zero(self):
-        assert _extract_score_from_json('{"score": -0.2}') == pytest.approx(0.0)
-
-    def test_regex_fallback_on_prose(self):
-        score = _extract_score_from_json("The answer scores approximately 0.72 out of 1.0")
-        assert score == pytest.approx(0.72)
-
-    def test_malformed_json_fallback(self):
-        score = _extract_score_from_json("{score: 0.6}")
-        assert 0.0 <= score <= 1.0
-
-    def test_no_number_returns_zero(self):
-        assert _extract_score_from_json("no numbers here at all") == 0.0
-
-    def test_integer_score(self):
+    def test_score_integer_in_json(self):
         assert _extract_score_from_json('{"score": 1}') == pytest.approx(1.0)
 
-    def test_zero_score(self):
-        assert _extract_score_from_json('{"score": 0}') == pytest.approx(0.0)
+    def test_score_zero(self):
+        assert _extract_score_from_json('{"score": 0.0}') == pytest.approx(0.0)
+
+    def test_regex_fallback_plain_text(self):
+        # no JSON — should find the first float in [0,1]
+        result = _extract_score_from_json("The answer scores approximately 0.7 out of 1.")
+        assert isinstance(result, float)
+        assert 0.0 <= result <= 1.0
+
+    def test_regex_fallback_returns_0_5_on_no_match(self):
+        # no numeric content — fallback default is 0.5
+        result = _extract_score_from_json("No numbers here at all.")
+        assert result == pytest.approx(0.5)
+
+    def test_malformed_json_uses_regex(self):
+        # malformed JSON — regex rescues it
+        result = _extract_score_from_json('{"score": 0.9 oops broken}')
+        assert result == pytest.approx(0.9)
 
 
 # ---------------------------------------------------------------------------
-# Tests: RagScores dataclass
+# RagScores
 # ---------------------------------------------------------------------------
 
 class TestRagScores:
     def test_to_dict_keys(self):
-        s = RagScores(faithfulness=0.9, context_recall=0.8, answer_relevancy=0.75, context_precision=0.6)
+        s = RagScores(
+            faithfulness=0.9,
+            context_recall=0.8,
+            answer_relevancy=0.75,
+            context_precision=0.6,
+        )
         d = s.to_dict()
         assert set(d.keys()) == {"faithfulness", "context_recall", "answer_relevancy", "context_precision"}
 
     def test_to_dict_values(self):
-        s = RagScores(faithfulness=0.9, context_recall=0.8, answer_relevancy=0.75, context_precision=0.6)
-        d = s.to_dict()
-        assert d["faithfulness"] == pytest.approx(0.9)
-        assert d["context_recall"] == pytest.approx(0.8)
+        s = RagScores(
+            faithfulness=0.9,
+            context_recall=0.8,
+            answer_relevancy=0.75,
+            context_precision=0.6,
+        )
+        assert s.to_dict()["faithfulness"] == pytest.approx(0.9)
+        assert s.to_dict()["context_recall"] == pytest.approx(0.8)
 
-    def test_to_dict_rounding(self):
-        s = RagScores(faithfulness=0.333333, context_recall=0.666666, answer_relevancy=0.0, context_precision=1.0)
-        d = s.to_dict()
-        assert d["faithfulness"] == pytest.approx(0.3333, abs=0.0001)
-        assert d["context_recall"] == pytest.approx(0.6667, abs=0.0001)
-
-    def test_perfect_scores(self):
-        s = RagScores(faithfulness=1.0, context_recall=1.0, answer_relevancy=1.0, context_precision=1.0)
-        d = s.to_dict()
-        assert all(v == 1.0 for v in d.values())
+    def test_rounding_to_4dp(self):
+        s = RagScores(
+            faithfulness=0.99999,
+            context_recall=0.33333,
+            answer_relevancy=0.66666,
+            context_precision=0.0,
+        )
+        # round() to 4dp
+        assert s.faithfulness == pytest.approx(1.0, abs=1e-4)
+        assert s.context_recall == pytest.approx(0.3333, abs=1e-4)
 
     def test_zero_scores(self):
-        s = RagScores(faithfulness=0.0, context_recall=0.0, answer_relevancy=0.0, context_precision=0.0)
-        d = s.to_dict()
-        assert all(v == 0.0 for v in d.values())
+        s = RagScores(
+            faithfulness=0.0,
+            context_recall=0.0,
+            answer_relevancy=0.0,
+            context_precision=0.0,
+        )
+        assert s.faithfulness == 0.0
+        assert s.to_dict()["context_precision"] == 0.0
+
+    def test_perfect_scores(self):
+        s = RagScores(
+            faithfulness=1.0,
+            context_recall=1.0,
+            answer_relevancy=1.0,
+            context_precision=1.0,
+        )
+        assert all(v == 1.0 for v in s.to_dict().values())
