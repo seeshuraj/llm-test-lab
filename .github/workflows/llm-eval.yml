@@ -1,4 +1,4 @@
-name: LLM Eval
+name: 🧪 LLM Test Lab CI
 
 on:
   push:
@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # -------------------------------------------------------------------------
-  # Job 1: Unit tests — self-contained, no backend deps needed
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Job 1: Unit tests — pure Python, no network, no backend deps beyond pytest
+  # ---------------------------------------------------------------------------
   unit-tests:
     name: 🧪 Unit Tests (scoring logic)
     runs-on: ubuntu-latest
@@ -28,11 +28,11 @@ jobs:
         run: pip install pytest
 
       - name: Run unit tests
-        run: pytest apps/backend/tests/ -v
+        run: pytest apps/backend/tests/ -v --tb=short
 
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
   # Job 2: LLM evaluation — only runs if unit tests pass
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
   evaluate:
     name: 🤖 LLM Test Lab CI
     runs-on: ubuntu-latest
@@ -50,85 +50,123 @@ jobs:
       - name: Install CLI deps
         run: pip install pyyaml
 
-      - name: Validate API URL is set
-        run: |
-          if [ -z "${{ vars.LLM_TEST_LAB_API_URL }}" ]; then
-            echo "❌ LLM_TEST_LAB_API_URL is not set in GitHub repository variables."
-            echo "   Go to: Settings → Secrets and variables → Actions → Variables"
-            echo "   Add: LLM_TEST_LAB_API_URL = https://llm-test-lab.onrender.com"
-            exit 1
-          fi
-          echo "✅ API URL: ${{ vars.LLM_TEST_LAB_API_URL }}"
-
-      - name: Validate token is set
+      # -----------------------------------------------------------------------
+      # Validate required config before spending time on warm-ups
+      # -----------------------------------------------------------------------
+      - name: Validate required config
         env:
           LLM_TEST_LAB_TOKEN: ${{ secrets.LLM_TEST_LAB_TOKEN }}
         run: |
+          ERRORS=0
+          if [ -z "${{ vars.LLM_TEST_LAB_API_URL }}" ]; then
+            echo "❌ LLM_TEST_LAB_API_URL is not set."
+            echo "   Settings → Secrets and variables → Actions → Variables"
+            echo "   Value: https://llm-test-lab.onrender.com  (your Render backend URL)"
+            ERRORS=1
+          else
+            echo "✅ API URL: ${{ vars.LLM_TEST_LAB_API_URL }}"
+          fi
           if [ -z "$LLM_TEST_LAB_TOKEN" ]; then
             echo "❌ LLM_TEST_LAB_TOKEN secret is not set."
-            echo "   Go to: Settings → Secrets and variables → Actions → Secrets"
-            echo "   Add: LLM_TEST_LAB_TOKEN = <your API token from the LLM Test Lab dashboard>"
+            echo "   Settings → Secrets and variables → Actions → Secrets"
+            echo "   Value: your ltk_... API key from the LLM Test Lab dashboard"
+            ERRORS=1
+          else
+            echo "✅ Token is set (length=${#LLM_TEST_LAB_TOKEN})"
+          fi
+          exit $ERRORS
+
+      # -----------------------------------------------------------------------
+      # Step 1: Wake the TEST APP first — this is what the backend calls
+      # during evaluation. If it’s cold when the eval fires, backend returns 502.
+      # Must be READY before we even touch the backend.
+      # -----------------------------------------------------------------------
+      - name: ⏳ Warm up test app (llm-test-lab-test.onrender.com)
+        run: |
+          echo "Waking test app from Render free-tier sleep..."
+          READY=0
+          for i in $(seq 1 14); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 35 \
+              -X POST \
+              -H "Content-Type: application/json" \
+              -d '{"question":"ping"}' \
+              "https://llm-test-lab-test.onrender.com/answer" 2>/dev/null || echo "000")
+            echo "  Attempt $i/14: HTTP $STATUS"
+            # 200 = fully ready, 422 = app is up but wrong payload shape — both mean alive
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ]; then
+              echo "✅ Test app is ready (HTTP $STATUS)"
+              READY=1
+              break
+            fi
+            if [ "$i" != "14" ]; then
+              echo "  💤 Sleeping 15s before retry..."
+              sleep 15
+            fi
+          done
+          if [ "$READY" = "0" ]; then
+            echo "❌ Test app never responded after ~3.5 minutes."
+            echo "   Check: https://dashboard.render.com → llm-test-lab-test service"
+            echo "   The service may be suspended or have a startup error."
             exit 1
           fi
-          echo "✅ Token is set (length=${#LLM_TEST_LAB_TOKEN})"
 
-      - name: Warm up backend API (Render free tier cold start)
+      # -----------------------------------------------------------------------
+      # Step 2: Wake the BACKEND API — after test app is confirmed ready
+      # -----------------------------------------------------------------------
+      - name: ⏳ Warm up backend API (${{ vars.LLM_TEST_LAB_API_URL }})
         run: |
-          echo "Pinging backend to wake it from sleep..."
-          for i in 1 2 3 4 5 6 7 8; do
+          echo "Waking backend API..."
+          READY=0
+          for i in $(seq 1 10); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 30 \
+              --max-time 35 \
               "${{ vars.LLM_TEST_LAB_API_URL }}/health" 2>/dev/null || echo "000")
-            echo "  Attempt $i: HTTP $STATUS"
+            echo "  Attempt $i/10: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
-              echo "✅ Backend is awake"
+              echo "✅ Backend is ready"
+              READY=1
               break
             fi
-            if [ "$i" = "8" ]; then
-              echo "⚠️  Backend did not respond after 8 attempts — proceeding anyway."
-            else
-              echo "  Sleeping 15s before retry..."
+            if [ "$i" != "10" ]; then
+              echo "  💤 Sleeping 15s before retry..."
               sleep 15
             fi
           done
+          if [ "$READY" = "0" ]; then
+            echo "❌ Backend never responded after ~2.5 minutes."
+            echo "   Check: https://dashboard.render.com → llm-test-lab service"
+            exit 1
+          fi
 
-      - name: Warm up test app (Render free tier cold start)
-        run: |
-          echo "Pinging test app to wake it from sleep..."
-          for i in 1 2 3 4 5 6; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-              --max-time 30 \
-              "https://llm-test-lab-test.onrender.com/answer" \
-              -X POST -H "Content-Type: application/json" \
-              -d '{"question":"ping"}' 2>/dev/null || echo "000")
-            echo "  Attempt $i: HTTP $STATUS"
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ] || [ "$STATUS" = "404" ]; then
-              echo "✅ Test app is awake (HTTP $STATUS)"
-              break
-            fi
-            if [ "$i" = "6" ]; then
-              echo "⚠️  Test app did not respond after 6 attempts — evaluation may still proceed."
-            else
-              echo "  Sleeping 15s before retry..."
-              sleep 15
-            fi
-          done
+      # -----------------------------------------------------------------------
+      # Step 3: Settle pause — both services are awake but give them a moment
+      # to finish any remaining initialisation (DB migrations, etc.)
+      # -----------------------------------------------------------------------
+      - name: ⏳ Settle pause (5s)
+        run: sleep 5
 
-      - name: Run LLM Test Lab evaluation
+      # -----------------------------------------------------------------------
+      # Step 4: Run the evaluation
+      # -----------------------------------------------------------------------
+      - name: 🚀 Run LLM Test Lab evaluation
         env:
           LLM_TEST_LAB_TOKEN: ${{ secrets.LLM_TEST_LAB_TOKEN }}
         run: |
           python cli/llm_eval.py \
-            --api-url ${{ vars.LLM_TEST_LAB_API_URL }} \
+            --api-url "${{ vars.LLM_TEST_LAB_API_URL }}" \
             --token "$LLM_TEST_LAB_TOKEN" \
             --scenarios apps/backend/scenarios.yaml \
             --project "llm-test-lab" \
             --variant "${{ github.sha }}" \
-            --run-label "CI: ${{ github.ref_name }} @ ${{ github.sha }}" \
+            --run-label "CI: ${{ github.ref_name }} @ $(echo '${{ github.sha }}' | cut -c1-7)" \
             --model "llama-3.1-8b-instant" \
             --app-url "https://llm-test-lab-test.onrender.com/answer" \
             --fail-under 0.6
 
-      - name: Upload results summary
+      - name: 📊 Results summary
         if: always()
-        run: echo "View full results at ${{ vars.LLM_TEST_LAB_API_URL }}"
+        run: |
+          echo "View full results: ${{ vars.LLM_TEST_LAB_API_URL }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
