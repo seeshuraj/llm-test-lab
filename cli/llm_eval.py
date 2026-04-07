@@ -24,6 +24,8 @@ import time
 import urllib.request
 import urllib.error
 
+DIVIDER = "\u2500" * 60
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="LLM Test Lab — run evaluations from CI")
@@ -61,10 +63,10 @@ def post_json(url, payload, token):
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        print(f"\n❌ HTTP {e.code}: {body}", file=sys.stderr)
+        print(f"\n\u274c HTTP {e.code}: {body}", file=sys.stderr)
         sys.exit(1)
     except urllib.error.URLError as e:
-        print(f"\n❌ Connection error: {e.reason}", file=sys.stderr)
+        print(f"\n\u274c Connection error: {e.reason}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -73,47 +75,50 @@ def print_results(run):
     avg = run.get("avg_score", 0)
     run_id = run.get("run_id", "unknown")
 
-    print(f"\n{'\u2500'*60}")
-    print(f"  LLM Test Lab — Evaluation Results")
-    print(f"{'\u2500'*60}")
+    print("\n" + DIVIDER)
+    print("  LLM Test Lab \u2014 Evaluation Results")
+    print(DIVIDER)
     print(f"  Run ID   : {run_id}")
     print(f"  Project  : {run.get('project', '')}")
     print(f"  Variant  : {run.get('variant_name', '')}")
     print(f"  Model    : {run.get('model_name', '')}")
     print(f"  Scenarios: {len(results)}")
-    print(f"{'\u2500'*60}")
+    print(DIVIDER)
 
     passed = 0
     has_errors = False
     for r in results:
         score = r.get("score", 0)
         reason = r.get("reason", "")
-        icon = "✅" if score >= 0.8 else "⚠️ " if score >= 0.5 else "❌"
+        icon = "\u2705" if score >= 0.8 else "\u26a0\ufe0f " if score >= 0.5 else "\u274c"
         if score >= 0.8:
             passed += 1
         sid = r.get("scenario_id", "")[:30]
         rag = r.get("rag_metrics") or {}
         rag_str = ""
         if rag:
-            rag_str = (f"  [F:{rag.get('faithfulness',0):.2f}"
-                       f" CR:{rag.get('context_recall',0):.2f}"
-                       f" AR:{rag.get('answer_relevancy',0):.2f}"
-                       f" CP:{rag.get('context_precision',0):.2f}]")
+            rag_str = (
+                "  [F:{:.2f} CR:{:.2f} AR:{:.2f} CP:{:.2f}]".format(
+                    rag.get("faithfulness", 0),
+                    rag.get("context_recall", 0),
+                    rag.get("answer_relevancy", 0),
+                    rag.get("context_precision", 0),
+                )
+            )
         print(f"  {icon} [{score:.2f}] {sid}{rag_str}")
-        # Always print reason so errors are visible in CI logs
         if reason:
             print(f"       \u2514\u2500 {reason[:200]}")
             if "error" in reason.lower() or "exception" in reason.lower() or score == 0.0:
                 has_errors = True
 
     pass_rate = (passed / len(results) * 100) if results else 0
-    print(f"{'\u2500'*60}")
+    print(DIVIDER)
     print(f"  Avg Score : {avg:.3f}")
     print(f"  Pass Rate : {pass_rate:.0f}% ({passed}/{len(results)} passed \u22650.8)")
-    print(f"{'\u2500'*60}\n")
+    print(DIVIDER + "\n")
 
     if has_errors:
-        print("⚠️  One or more scenarios failed at the app endpoint — check the reasons above.\n")
+        print("\u26a0\ufe0f  One or more scenarios failed at the app endpoint \u2014 check the reasons above.\n")
 
     return avg
 
@@ -121,7 +126,7 @@ def print_results(run):
 def main():
     args = parse_args()
 
-    print(f"\n🧪 LLM Test Lab CI")
+    print("\n\U0001f9ea LLM Test Lab CI")
     print(f"   Project : {args.project}")
     print(f"   Variant : {args.variant}")
     print(f"   Model   : {args.model}")
@@ -141,20 +146,20 @@ def main():
         "app_endpoint_url": args.app_url,
     }
 
-    print("⏳ Running evaluation...")
+    print("\u23f3 Running evaluation...")
     start = time.time()
     run = post_json(f"{args.api_url.rstrip('/')}/api/run-local", payload, args.token)
     elapsed = time.time() - start
-    print(f"✅ Completed in {elapsed:.1f}s")
+    print(f"\u2705 Completed in {elapsed:.1f}s")
 
     avg = print_results(run)
 
     if args.fail_under is not None:
         if avg < args.fail_under:
-            print(f"❌ FAILED: avg score {avg:.3f} is below threshold {args.fail_under}")
+            print(f"\u274c FAILED: avg score {avg:.3f} is below threshold {args.fail_under}")
             sys.exit(1)
         else:
-            print(f"✅ PASSED: avg score {avg:.3f} >= threshold {args.fail_under}")
+            print(f"\u2705 PASSED: avg score {avg:.3f} >= threshold {args.fail_under}")
 
     sys.exit(0)
 
