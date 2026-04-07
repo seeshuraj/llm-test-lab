@@ -85,14 +85,19 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Step 1: Wake the TEST APP first — this is what the backend calls
-      # during evaluation. If it's cold when the eval fires, backend returns 502.
+      # during evaluation. If it’s cold when the eval fires, backend returns 502.
       # Must be READY before we even touch the backend.
-      # HTTP 500 during warm-up = Render worker still booting — keep retrying.
+      #
+      # KEY CHANGE: distinguish transient cold-boot 500 (Render worker waking)
+      # from persistent 500 (real app crash e.g. missing GROQ_API_KEY).
+      # After 3 consecutive 500s we fail fast — no point retrying a broken app.
       # -----------------------------------------------------------------------
       - name: ⏳ Warm up test app (llm-test-lab-test.onrender.com)
         run: |
           echo "Waking test app from Render free-tier sleep..."
           READY=0
+          CONSECUTIVE_500=0
+
           for i in $(seq 1 14); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               --max-time 35 \
@@ -101,26 +106,54 @@ jobs:
               -d '{"question":"ping"}' \
               "https://llm-test-lab-test.onrender.com/answer" 2>/dev/null || echo "000")
             echo "  Attempt $i/14: HTTP $STATUS"
+
             # 200 = fully ready; 422 = app alive but wrong payload shape — both mean awake
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "422" ]; then
               echo "✅ Test app is ready (HTTP $STATUS)"
               READY=1
+              CONSECUTIVE_500=0
               break
             fi
+
             if [ "$STATUS" = "500" ]; then
-              echo "  ⚠️  HTTP 500 — Render worker still booting, retrying..."
-            elif [ "$STATUS" = "000" ]; then
-              echo "  💤 No connection yet..."
+              CONSECUTIVE_500=$((CONSECUTIVE_500 + 1))
+              echo "  ⚠️  HTTP 500 (consecutive: $CONSECUTIVE_500) — may be cold-boot or app error"
+              # After 3 consecutive 500s this is a real app crash, not a cold boot.
+              # Render cold-boot 500s resolve within 1–2 retries.
+              if [ "$CONSECUTIVE_500" -ge 3 ]; then
+                echo ""
+                echo "❌ FATAL: Test app returned HTTP 500 three times in a row."
+                echo "   This is NOT a cold-boot issue — the app is crashing on startup or on the /answer request."
+                echo ""
+                echo "   Most likely cause: GROQ_API_KEY env var is missing or invalid in Render."
+                echo "   Fix: Render Dashboard → llm-test-lab-test service → Environment → set GROQ_API_KEY"
+                echo ""
+                echo "   Other causes to check in Render Logs:"
+                echo "     • Import error on startup (missing dependency)"
+                echo "     • Groq API returning 401 (key revoked) or 429 (rate limit)"
+                echo "     • Unhandled exception in /answer handler"
+                echo ""
+                echo "   Render Logs: https://dashboard.render.com → llm-test-lab-test → Logs"
+                exit 1
+              fi
+            else
+              CONSECUTIVE_500=0
             fi
+
+            if [ "$STATUS" = "000" ]; then
+              echo "  💤 No connection yet (service still sleeping)..."
+            fi
+
             if [ "$i" != "14" ]; then
               echo "  Sleeping 15s before retry..."
               sleep 15
             fi
           done
+
           if [ "$READY" = "0" ]; then
             echo "❌ Test app never became ready after ~3.5 minutes."
             echo "   Check: https://dashboard.render.com → llm-test-lab-test service"
-            echo "   The service may be suspended or have a startup error."
+            echo "   The service may be suspended, have a startup error, or GROQ_API_KEY is not set."
             exit 1
           fi
 
@@ -149,6 +182,7 @@ jobs:
           if [ "$READY" = "0" ]; then
             echo "❌ Backend never responded after ~2.5 minutes."
             echo "   Check: https://dashboard.render.com → llm-test-lab service"
+            echo "   Ensure SUPABASE_DB_URL is set in Render environment variables."
             exit 1
           fi
 

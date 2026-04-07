@@ -3,7 +3,7 @@
 LLM Test Lab CLI
 Usage:
   python cli/llm_eval.py \
-    --api-url https://your-backend.railway.app \
+    --api-url https://your-backend.onrender.com \
     --token $LLM_TEST_LAB_TOKEN \
     --scenarios scenarios.yaml \
     --project my-app \
@@ -11,6 +11,10 @@ Usage:
     [--model llama-3.1-8b-instant] \
     [--app-url https://your-app.com/answer] \
     [--fail-under 0.7]
+
+Backend: Render (web service)
+Database: Supabase PostgreSQL (set SUPABASE_DB_URL in Render environment)
+Token: ltk_... API key from LLM Test Lab dashboard → Settings → API Keys
 """
 
 import argparse
@@ -69,15 +73,15 @@ def print_results(run):
     avg = run.get("avg_score", 0)
     run_id = run.get("run_id", "unknown")
 
-    print(f"\n{'─'*60}")
+    print(f"\n{'\u2500'*60}")
     print(f"  LLM Test Lab — Evaluation Results")
-    print(f"{'─'*60}")
+    print(f"{'\u2500'*60}")
     print(f"  Run ID   : {run_id}")
     print(f"  Project  : {run.get('project', '')}")
     print(f"  Variant  : {run.get('variant_name', '')}")
     print(f"  Model    : {run.get('model_name', '')}")
     print(f"  Scenarios: {len(results)}")
-    print(f"{'─'*60}")
+    print(f"{'\u2500'*60}")
 
     passed = 0
     has_errors = False
@@ -98,15 +102,15 @@ def print_results(run):
         print(f"  {icon} [{score:.2f}] {sid}{rag_str}")
         # Always print reason so errors are visible in CI logs
         if reason:
-            print(f"       └─ {reason[:200]}")
+            print(f"       \u2514\u2500 {reason[:200]}")
             if "error" in reason.lower() or "exception" in reason.lower() or score == 0.0:
                 has_errors = True
 
     pass_rate = (passed / len(results) * 100) if results else 0
-    print(f"{'─'*60}")
+    print(f"{'\u2500'*60}")
     print(f"  Avg Score : {avg:.3f}")
-    print(f"  Pass Rate : {pass_rate:.0f}% ({passed}/{len(results)} passed ≥0.8)")
-    print(f"{'─'*60}\n")
+    print(f"  Pass Rate : {pass_rate:.0f}% ({passed}/{len(results)} passed \u22650.8)")
+    print(f"{'\u2500'*60}\n")
 
     if has_errors:
         print("⚠️  One or more scenarios failed at the app endpoint — check the reasons above.\n")
