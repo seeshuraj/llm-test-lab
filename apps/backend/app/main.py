@@ -12,7 +12,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("llm_test_lab")
 
 # ---------------------------------------------------------------------------
-# Rate limiter
+# Rate limiter (abuse protection — short-burst)
 # ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
 
@@ -100,6 +100,12 @@ SUPPORTED_MODELS = [
 
 _APP_ENDPOINT_TIMEOUT = float(os.environ.get("APP_ENDPOINT_TIMEOUT", "90"))
 
+# ---------------------------------------------------------------------------
+# Free trial config
+# ---------------------------------------------------------------------------
+# Override by setting FREE_TRIAL_RUN_LIMIT env var (set to 0 to disable cap).
+FREE_TRIAL_RUN_LIMIT = int(os.environ.get("FREE_TRIAL_RUN_LIMIT", "5"))
+
 _user_last_run: dict[str, float] = defaultdict(float)
 _user_running: set[str] = set()
 RUN_COOLDOWN_SECONDS = 10
@@ -107,11 +113,40 @@ RUN_COOLDOWN_SECONDS = 10
 
 def _check_rate_limit(user_id: str):
     if user_id in _user_running:
-        raise HTTPException(status_code=429, detail="You already have a run in progress. Please wait for it to finish.")
+        raise HTTPException(
+            status_code=429,
+            detail="You already have a run in progress. Please wait for it to finish."
+        )
     since_last = time.monotonic() - _user_last_run[user_id]
     if since_last < RUN_COOLDOWN_SECONDS:
         wait = int(RUN_COOLDOWN_SECONDS - since_last) + 1
-        raise HTTPException(status_code=429, detail=f"Please wait {wait}s before starting another run.")
+        raise HTTPException(
+            status_code=429,
+            detail=f"Please wait {wait}s before starting another run."
+        )
+
+
+async def _check_trial_limit(user_id: str, db: AsyncSession):
+    """Block users who have exhausted their free trial run quota.
+
+    Set FREE_TRIAL_RUN_LIMIT=0 to disable the cap entirely (e.g. for Pro users
+    once billing is wired up).
+    """
+    if FREE_TRIAL_RUN_LIMIT <= 0:
+        return  # cap disabled
+    result = await db.execute(
+        select(func.count()).select_from(Run).where(Run.user_id == user_id)
+    )
+    total_runs = result.scalar() or 0
+    if total_runs >= FREE_TRIAL_RUN_LIMIT:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Free trial limit reached ({FREE_TRIAL_RUN_LIMIT} runs). "
+                "Upgrade to Pro to run unlimited evaluations. "
+                "Contact seeshuraj@proton.me to unlock your account."
+            )
+        )
 
 
 @app.on_event("startup")
@@ -219,14 +254,15 @@ def list_models():
 
 
 @app.post("/api/run-local", response_model=RunOut)
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")  # abuse protection on top of trial cap
 async def run_local(
     request: Request,
     req: RunLocalRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _check_rate_limit(current_user.id)
+    await _check_trial_limit(current_user.id, db)  # lifetime cap check
+    _check_rate_limit(current_user.id)              # cooldown check
 
     if req.model_name not in SUPPORTED_MODELS:
         raise HTTPException(
@@ -398,7 +434,7 @@ async def update_run_label(
 
 
 @app.post("/api/runs/{run_id}/rerun", response_model=RunOut)
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def rerun(
     run_id: str,
     request: Request,
