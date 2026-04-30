@@ -4,26 +4,38 @@
 
 [![CI](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml/badge.svg)](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-LLM%20Test%20Lab%20Eval-blue?logo=github)](https://github.com/marketplace/actions/llm-test-lab-eval)
 [![GitHub stars](https://img.shields.io/github/stars/seeshuraj/llm-test-lab?style=social)](https://github.com/seeshuraj/llm-test-lab/stargazers)
 
 LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at any RAG pipeline or LLM endpoint — it scores every answer on faithfulness, relevancy, and grounding, tracks quality over time, and fails your CI when regressions slip through.
 
-🌐 **Live App:** [llm-test-lab-app.vercel.app](https://llm-test-lab-app.vercel.app)  
-🏠 **Landing:** [llm-test-lab-psi.vercel.app](https://llm-test-lab-psi.vercel.app)  
-📦 **Backend API:** [llm-test-lab.fly.dev](https://llm-test-lab.fly.dev/health)
+🌐 **Live App:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)  
+📦 **Backend API:** [llm-test-lab-api.fly.dev/health](https://llm-test-lab-api.fly.dev/health)  
+🛒 **GitHub Marketplace:** [LLM Test Lab Eval](https://github.com/marketplace/actions/llm-test-lab-eval)
+
+---
+
+## 🎬 Demo
+
+<!-- DEMO: Replace the line below with your GIF/video once recorded -->
+> 📹 **Demo coming soon** — run `python cli/llm_eval.py --scenarios scenarios.yaml` to see it in action locally.
+
+<!-- Once you have a GIF, replace the line above with:
+![LLM Test Lab Demo](https://your-url/demo.gif)
+-->
 
 ---
 
 ## ✨ Features
 
 - **RAG metrics** — Faithfulness, Context Recall, Answer Relevancy, Context Precision
-- **LLM-as-judge scoring** — Automated 0–1 scores via Groq (Llama 3.1/3.3)
+- **LLM-as-judge scoring** — Automated 0–1 scores via Groq (Llama 3.1 / 3.3)
 - **Score trend charts** — Track quality over time per project
 - **A/B comparison** — Side-by-side score deltas between two runs
 - **Latency tracking** — Real response time per scenario
 - **CI/CD integration** — GitHub Action that fails your build on regressions
 - **Works with any HTTP endpoint** — No SDK required
-- **Email alerts** — Notify when score drops below threshold
+- **Slack alerts** — Notify your team when scores drop below threshold
 
 ---
 
@@ -31,8 +43,9 @@ LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at 
 
 ```bash
 git clone https://github.com/seeshuraj/llm-test-lab.git && cd llm-test-lab
-pip install -r apps/backend/requirements.txt && cp apps/backend/.env.example apps/backend/.env
-# Set GROQ_API_KEY in apps/backend/.env, then:
+pip install -r apps/backend/requirements.txt
+cp apps/backend/.env.example apps/backend/.env
+# Add GROQ_API_KEY to apps/backend/.env, then:
 uvicorn apps.backend.app.main:app --reload
 ```
 
@@ -41,11 +54,11 @@ Frontend:
 cd apps/frontend && npm install && cp .env.example .env.local && npm run dev
 ```
 
+Open [http://localhost:3000](http://localhost:3000) and click **+ New Run**.
+
 ---
 
-## 🔌 GitHub Action — Add to Your Repo
-
-Add automated evals to **any** repo in 10 lines:
+## 🔌 GitHub Action — Add to Any Repo in 10 Lines
 
 ```yaml
 # .github/workflows/eval.yml
@@ -84,8 +97,7 @@ jobs:
 
 ```
 llm-test-lab/
-├── action.yml              # Reusable GitHub Action
-├── landing/                # Next.js landing page (Vercel)
+├── action.yml              # Reusable GitHub Action (Marketplace)
 ├── apps/
 │   ├── backend/            # FastAPI scoring engine + REST API (Fly.io)
 │   └── frontend/           # Dashboard: auth, runs, compare, trends (Vercel)
@@ -94,14 +106,15 @@ llm-test-lab/
 │   └── sdk-python/         # Python SDK
 ├── cli/
 │   └── llm_eval.py         # CI script invoked by action.yml
-└── .github/workflows/      # CI: unit tests + LLM eval on push to main
+└── .github/workflows/      # CI: unit tests + LLM eval on push
 ```
 
-| Layer | Host |
-|---|---|
-| Frontend (Next.js) | Vercel |
-| Backend (FastAPI) | Fly.io |
-| Database | Supabase (PostgreSQL) |
+| Layer | Stack | Host |
+|---|---|---|
+| Frontend | Next.js, TypeScript, Tailwind | Vercel |
+| Backend | FastAPI, Python 3.11 | Fly.io |
+| Database | PostgreSQL | Supabase |
+| AI / Judges | Groq — Llama 3.1 8B, 3.3 70B | — |
 
 ---
 
@@ -115,22 +128,16 @@ llm-test-lab/
 | `SUPABASE_DB_URL` | ✅ | `postgresql://postgres:[pass]@db.[ref].supabase.co:5432/postgres` |
 | `SECRET_KEY` | ✅ | `openssl rand -hex 32` |
 | `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs |
+| `SLACK_WEBHOOK_URL` | optional | Slack alerts on score regression |
 | `RESEND_API_KEY` | optional | Email alerts via [resend.com](https://resend.com) |
 
 ### Frontend (Vercel env vars)
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Backend URL: `https://llm-test-lab.fly.dev` |
+| `NEXT_PUBLIC_API_URL` | Backend URL, e.g. `https://llm-test-lab-api.fly.dev` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
-
-### GitHub Actions
-
-| Name | Type | Description |
-|---|---|---|
-| `LLM_TEST_LAB_TOKEN` | Secret | API token from dashboard |
-| `LLM_TEST_LAB_API_URL` | Variable | `https://llm-test-lab.fly.dev` |
 
 > **Local dev:** If `SUPABASE_DB_URL` is not set, backend falls back to SQLite automatically.
 
@@ -140,19 +147,17 @@ llm-test-lab/
 
 - [x] Multi-model eval engine
 - [x] LLM-as-judge scoring (Groq)
-- [x] RAG evaluation (faithfulness, context recall, answer relevancy, context precision)
-- [x] Score history in Supabase
+- [x] RAG evaluation metrics
+- [x] Score history + trend charts
 - [x] Auth + personal dashboards
-- [x] A/B comparison
-- [x] Score trend charts
+- [x] A/B run comparison
 - [x] CI/CD GitHub Action (`uses: seeshuraj/llm-test-lab@v1`)
-- [x] Email alerts on score regression
+- [x] Slack alerts on score regression
 - [x] Deployed on Fly.io (always-on)
-- [ ] Stripe billing (Free / Pro / Teams)
-- [ ] Slack / webhook notifications
+- [ ] Live demo (no signup)
 - [ ] Drift detection alerts
 - [ ] npm / PyPI SDK packages
-- [ ] Live demo (no signup)
+- [ ] Stripe billing (Free / Pro / Teams)
 
 ---
 
@@ -167,7 +172,7 @@ llm-test-lab/
 | Auth | JWT (python-jose + bcrypt) |
 | CI | GitHub Actions |
 | Hosting | Fly.io + Vercel |
-| Email | Resend |
+| Alerts | Slack Webhooks, Resend (email) |
 
 ---
 
