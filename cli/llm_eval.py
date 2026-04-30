@@ -10,7 +10,8 @@ Usage:
     --variant v1.2 \
     [--model llama-3.1-8b-instant] \
     [--app-url https://your-app.com/answer] \
-    [--fail-under 0.7]
+    [--fail-under 0.7] \
+    [--output json]
 
 Backend: Render (web service)
 Database: Supabase PostgreSQL (set SUPABASE_DB_URL in Render environment)
@@ -39,6 +40,8 @@ def parse_args():
     p.add_argument("--run-label", default=None, help="Human-readable label for this run")
     p.add_argument("--fail-under", type=float, default=None,
                    help="Exit code 1 if avg score is below this threshold (0.0-1.0)")
+    p.add_argument("--output", choices=["text", "json"], default="text",
+                   help="Output format: 'text' (default) or 'json' for machine-readable results")
     return p.parse_args()
 
 
@@ -123,17 +126,42 @@ def print_results(run):
     return avg
 
 
+def build_json_output(run, fail_under):
+    results = run.get("results", [])
+    avg = run.get("avg_score", 0)
+    passed = fail_under is None or avg >= fail_under
+    return {
+        "run_id": run.get("run_id", ""),
+        "project": run.get("project", ""),
+        "variant": run.get("variant_name", ""),
+        "model": run.get("model_name", ""),
+        "avg_score": round(avg, 4),
+        "passed": passed,
+        "fail_under": fail_under,
+        "scenarios": [
+            {
+                "id": r.get("scenario_id", ""),
+                "score": r.get("score", 0),
+                "latency_ms": r.get("latency_ms", 0),
+                "reason": r.get("reason", ""),
+            }
+            for r in results
+        ],
+    }
+
+
 def main():
     args = parse_args()
 
-    print("\n\U0001f9ea LLM Test Lab CI")
-    print(f"   Project : {args.project}")
-    print(f"   Variant : {args.variant}")
-    print(f"   Model   : {args.model}")
-    print(f"   Scenarios: {args.scenarios}")
-    if args.app_url:
-        print(f"   App URL : {args.app_url}")
-    print()
+    if args.output == "text":
+        print("\n\U0001f9ea LLM Test Lab CI")
+        print(f"   Project : {args.project}")
+        print(f"   Variant : {args.variant}")
+        print(f"   Model   : {args.model}")
+        print(f"   Scenarios: {args.scenarios}")
+        if args.app_url:
+            print(f"   App URL : {args.app_url}")
+        print()
 
     scenarios_yaml = read_file(args.scenarios)
 
@@ -146,12 +174,21 @@ def main():
         "app_endpoint_url": args.app_url,
     }
 
-    print("\u23f3 Running evaluation...")
+    if args.output == "text":
+        print("\u23f3 Running evaluation...")
     start = time.time()
     run = post_json(f"{args.api_url.rstrip('/')}/api/run-local", payload, args.token)
     elapsed = time.time() - start
-    print(f"\u2705 Completed in {elapsed:.1f}s")
 
+    if args.output == "json":
+        output = build_json_output(run, args.fail_under)
+        print(json.dumps(output, indent=2))
+        if args.fail_under is not None and run.get("avg_score", 0) < args.fail_under:
+            sys.exit(1)
+        sys.exit(0)
+
+    # --- text output (default) ---
+    print(f"\u2705 Completed in {elapsed:.1f}s")
     avg = print_results(run)
 
     if args.fail_under is not None:
