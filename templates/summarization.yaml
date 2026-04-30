@@ -1,0 +1,36 @@
+# LLM Test Lab — Starter Template: Summarization
+# Use this to evaluate an LLM's ability to summarise text accurately and concisely.
+#
+# Usage:
+#   python cli/llm_eval.py --scenarios templates/summarization.yaml --project summarizer ...
+
+scenarios:
+  - id: news_article
+    question: "Summarise the following article in 2 sentences."
+    context_docs:
+      - "Scientists at MIT have developed a new battery technology that charges in under 5 minutes and lasts twice as long as current lithium-ion batteries. The breakthrough uses a solid-state electrolyte that prevents the dendrite formation responsible for battery degradation. Trials show the new cells retain 95% capacity after 1,000 charge cycles. The team expects commercial availability within 3 years."
+    expected_keywords: ["battery", "5 minutes", "solid-state", "MIT"]
+
+  - id: key_points_extraction
+    question: "What are the three main points of this text?"
+    context_docs:
+      - "Remote work has increased employee productivity by 13% according to a Stanford study. However, it has also led to longer working hours and blurred work-life boundaries. Companies are now experimenting with hybrid models to balance flexibility with collaboration."
+    expected_keywords: ["productivity", "hybrid", "work-life", "13%"]
+
+  - id: length_constraint
+    question: "Summarise this in one sentence."
+    context_docs:
+      - "The Eiffel Tower was built between 1887 and 1889 as the entrance arch to the 1889 World's Fair. It was designed by Gustave Eiffel and initially criticised by many Paris artists. Today it is the most visited paid monument in the world, attracting nearly 7 million visitors per year."
+    expected_keywords: ["Eiffel Tower", "1889", "Gustave Eiffel"]
+
+  - id: no_hallucination
+    question: "Summarise only what is stated in the text. Do not add outside knowledge."
+    context_docs:
+      - "The quarterly report shows revenue of $4.2M, up 18% year-over-year. Operating costs rose 7%. Net profit margin improved to 22%."
+    expected_keywords: ["$4.2M", "18%", "22%", "operating"]
+
+  - id: abstract_to_plain
+    question: "Explain this in plain English for a non-technical reader."
+    context_docs:
+      - "The system leverages transformer-based architectures with multi-head self-attention mechanisms to perform contextual token embeddings, enabling downstream fine-tuning on domain-specific corpora."
+    expected_keywords: ["AI", "language", "trained", "text"]

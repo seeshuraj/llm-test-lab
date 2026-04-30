@@ -1,0 +1,36 @@
+# LLM Test Lab — Starter Template: Code Assistant
+# Use this to evaluate a coding assistant for correctness, language accuracy, and explanation quality.
+#
+# Usage:
+#   python cli/llm_eval.py --scenarios templates/code-assistant.yaml --project code-bot ...
+
+scenarios:
+  - id: python_list_comprehension
+    question: "Write a Python list comprehension that squares all even numbers from 1 to 20."
+    context_docs:
+      - "Python list comprehensions use the syntax: [expr for item in iterable if condition]"
+    expected_keywords: ["**2", "for", "if", "range"]
+
+  - id: sql_aggregation
+    question: "Write a SQL query to find the average salary per department."
+    context_docs:
+      - "The employees table has columns: id, name, department, salary."
+    expected_keywords: ["AVG", "GROUP BY", "department", "salary"]
+
+  - id: big_o_explanation
+    question: "What is the time complexity of binary search and why?"
+    context_docs:
+      - "Binary search divides the search space in half at each step."
+    expected_keywords: ["O(log n)", "log", "halves", "sorted"]
+
+  - id: debug_off_by_one
+    question: "Why does this loop run one extra time: for i in range(1, n+1)?"
+    context_docs:
+      - "Python's range(start, stop) is exclusive of stop. range(1, n+1) produces values 1 through n inclusive."
+    expected_keywords: ["inclusive", "exclusive", "range", "n+1"]
+
+  - id: api_design
+    question: "What HTTP method should I use to partially update a resource?"
+    context_docs:
+      - "REST conventions: GET retrieves, POST creates, PUT replaces, PATCH partially updates, DELETE removes."
+    expected_keywords: ["PATCH", "partial", "update"]

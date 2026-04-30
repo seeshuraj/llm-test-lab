@@ -1,0 +1,40 @@
+# LLM Test Lab — Starter Template: Customer Support Bot
+# Use this to evaluate a support chatbot for tone, accuracy, and escalation handling.
+#
+# Usage:
+#   python cli/llm_eval.py --scenarios templates/customer-support.yaml --project support-bot ...
+
+scenarios:
+  - id: account_locked
+    question: "My account is locked and I can't log in. What do I do?"
+    context_docs:
+      - "If your account is locked, click 'Forgot Password' on the login page to reset your credentials."
+      - "After 5 failed attempts, accounts are locked for 15 minutes."
+    expected_keywords: ["Forgot Password", "reset", "15 minutes"]
+
+  - id: refund_request
+    question: "I want a refund for my last order."
+    context_docs:
+      - "Refunds are processed within 5-7 business days after the return is received."
+      - "To initiate a refund, go to Orders > Request Refund in your account dashboard."
+    expected_keywords: ["5-7 business days", "Orders", "refund"]
+
+  - id: escalation_to_human
+    question: "This is urgent, I need to speak to a real person right now."
+    context_docs:
+      - "For urgent issues, customers can call our support line at 1-800-555-0199 (Mon-Fri 9am-5pm)."
+      - "Live chat is available during business hours."
+    expected_keywords: ["1-800", "live chat", "urgent"]
+
+  - id: out_of_policy
+    question: "Can you give me a discount just this once?"
+    context_docs:
+      - "Discounts are applied automatically at checkout based on active promotions."
+      - "Support agents cannot manually apply discounts outside of active promotions."
+    expected_keywords: ["cannot", "promotions", "automatically"]
+
+  - id: product_info
+    question: "Does the Pro plan include API access?"
+    context_docs:
+      - "The Pro plan includes unlimited API access, priority support, and up to 10 team seats."
+    expected_keywords: ["API access", "Pro plan", "unlimited"]

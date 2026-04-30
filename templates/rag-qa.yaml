@@ -1,0 +1,40 @@
+# LLM Test Lab — Starter Template: RAG Q&A
+# Use this to evaluate a retrieval-augmented generation (RAG) system.
+# Each scenario sends a question + context to your app and scores the answer.
+#
+# Usage:
+#   python cli/llm_eval.py --scenarios templates/rag-qa.yaml --project my-rag-app ...
+
+scenarios:
+  - id: factual_recall
+    question: "What is the return policy?"
+    context_docs:
+      - "Items can be returned within 30 days of purchase with a valid receipt."
+      - "Sale items are non-refundable."
+    expected_keywords: ["30 days", "receipt", "return"]
+
+  - id: out_of_scope
+    question: "What is the weather today?"
+    context_docs:
+      - "Our store is open Monday to Saturday, 9am to 6pm."
+    expected_keywords: ["don't know", "not available", "context does not"]
+
+  - id: multi_doc_synthesis
+    question: "What payment methods are accepted?"
+    context_docs:
+      - "We accept Visa and Mastercard credit cards."
+      - "PayPal and Apple Pay are also supported at checkout."
+    expected_keywords: ["Visa", "Mastercard", "PayPal"]
+
+  - id: hallucination_check
+    question: "Do you offer free shipping?"
+    context_docs:
+      - "Shipping costs vary by location. Standard delivery is €4.99."
+    expected_keywords: ["€4.99", "shipping", "varies"]
+
+  - id: exact_quote
+    question: "What is the warranty period?"
+    context_docs:
+      - "All electronics come with a 2-year manufacturer warranty."
+      - "Accessories are covered for 6 months."
+    expected_keywords: ["2-year", "warranty", "manufacturer"]
