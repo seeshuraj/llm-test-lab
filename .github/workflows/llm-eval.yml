@@ -39,11 +39,14 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Job 2: LLM evaluation — only runs if unit tests pass
+  # NOTE: continue-on-error until Render free-tier quota resets (May 2026)
+  # Remove continue-on-error once test app is reliably available
   # ---------------------------------------------------------------------------
   evaluate:
     name: 🤖 LLM Test Lab CI
     runs-on: ubuntu-latest
     needs: unit-tests
+    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -83,7 +86,6 @@ jobs:
 
       # -----------------------------------------------------------------------
       # Step 1: Wake the TEST APP
-      # Fly.io cold start is ~1-2s vs Render's 30s, so fewer retries needed.
       # -----------------------------------------------------------------------
       - name: ⏳ Warm up test app (llm-test-lab-test.onrender.com)
         run: |
