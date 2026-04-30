@@ -74,7 +74,7 @@ export default function ComparePage() {
   };
 
   const diffBadge = (a: number | undefined, b: number | undefined) => {
-    if (a === undefined || b === undefined) return <span className="text-gray-500">—</span>;
+    if (a === undefined || b === undefined) return <span className="text-gray-400">—</span>;
     const diff = b - a;
     if (Math.abs(diff) < 0.005) return <span className="text-gray-400">±0.00</span>;
     return diff > 0
@@ -126,7 +126,7 @@ export default function ComparePage() {
         <div className="text-center py-20">
           <p className="text-5xl mb-4">⚖️</p>
           <p className="text-gray-400 text-lg mb-2">Nothing to compare yet</p>
-          <p className="text-gray-600 text-sm mb-6">You need at least 2 runs to compare. Go run some evaluations first.</p>
+          <p className="text-gray-500 text-sm mb-6">You need at least 2 runs to compare. Go run some evaluations first.</p>
           <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">← Run evaluations</Link>
         </div>
       )}
@@ -138,7 +138,7 @@ export default function ComparePage() {
             <div>
               <label className="block text-sm text-gray-400 mb-1">Run A (baseline)</label>
               <select value={runAId} onChange={(e) => setRunAId(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
                 <option value="">Select a run...</option>
                 {runs.map((r) => (
                   <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
@@ -148,7 +148,7 @@ export default function ComparePage() {
             <div>
               <label className="block text-sm text-gray-400 mb-1">Run B (new)</label>
               <select value={runBId} onChange={(e) => setRunBId(e.target.value)}
-                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
                 <option value="">Select a run...</option>
                 {runs.map((r) => (
                   <option key={r.run_id} value={r.run_id}>{runDisplayName(r)}</option>
@@ -172,6 +172,7 @@ export default function ComparePage() {
 
       {runA && runB && (
         <>
+          {/* Summary stat cards — bg-gray-900 / border-gray-700 */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               { label: "Avg Score A", value: avgA?.toFixed(3) ?? "—", color: scoreColor(avgA ?? 0) },
@@ -187,18 +188,19 @@ export default function ComparePage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* Delta card — inner sections use bg-gray-800 */}
             <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-gray-300 mb-4">Overall Delta (B − A)</h2>
               <div className="flex items-center justify-around">
-                <div className="text-center">
+                <div className="text-center bg-gray-800 rounded-lg px-4 py-3">
                   <p className="text-xs text-gray-500 mb-1">Score</p>
                   <p className="text-3xl font-bold">{avgA !== null && avgB !== null ? diffBadge(avgA, avgB) : "—"}</p>
                 </div>
-                <div className="text-center">
+                <div className="text-center bg-gray-800 rounded-lg px-4 py-3">
                   <p className="text-xs text-gray-500 mb-1">Regressions</p>
                   <p className="text-3xl font-bold text-red-400">{regressionCount}</p>
                 </div>
-                <div className="text-center">
+                <div className="text-center bg-gray-800 rounded-lg px-4 py-3">
                   <p className="text-xs text-gray-500 mb-1">Improvements</p>
                   <p className="text-3xl font-bold text-green-400">{improvementCount}</p>
                 </div>
@@ -238,7 +240,8 @@ export default function ComparePage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-300">Per-Scenario Diff</h2>
             <div className="flex items-center gap-2">
-              <div className="flex bg-gray-800 border border-gray-600 rounded-lg p-0.5 text-xs">
+              {/* Filter pills — border-gray-700 to match card borders */}
+              <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 text-xs">
                 {(["all", "regressions", "improvements"] as const).map((f) => (
                   <button key={f} onClick={() => setFilter(f)}
                     className={`px-3 py-1 rounded-md capitalize transition-colors ${
@@ -251,6 +254,7 @@ export default function ComparePage() {
             </div>
           </div>
 
+          {/* Table — bg-gray-900 cards, bg-gray-800 inner header + alternating rows */}
           <div className="overflow-x-auto rounded-xl border border-gray-700 mb-8">
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-800 text-gray-300">
@@ -268,7 +272,7 @@ export default function ComparePage() {
                   const a = mapA[sid];
                   const b = mapB[sid];
                   return (
-                    <tr key={sid} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
+                    <tr key={sid} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-800"}>
                       <td className="px-4 py-3 font-mono text-xs text-gray-400">{sid}</td>
                       <td className="px-4 py-3">{scoreBadge(a?.score)}</td>
                       <td className="px-4 py-3">{scoreBadge(b?.score)}</td>
@@ -292,19 +296,19 @@ export default function ComparePage() {
               const b = mapB[sid];
               if (!a && !b) return null;
               const diff = a && b ? b.score - a.score : 0;
-              const rowBg = diff > 0.005 ? "border-green-800" : diff < -0.005 ? "border-red-800" : "border-gray-700";
+              const rowBorder = diff > 0.005 ? "border-green-800" : diff < -0.005 ? "border-red-800" : "border-gray-700";
               return (
-                <div key={sid} className={`bg-gray-900 border ${rowBg} rounded-xl p-4`}>
+                <div key={sid} className={`bg-gray-900 border ${rowBorder} rounded-xl p-4`}>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs font-mono text-gray-400">{sid}</p>
                     <span>{diffBadge(a?.score, b?.score)}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                    <div className="bg-gray-800 rounded-lg p-3">
                       <p className="text-xs text-gray-500 mb-1">Run A — {a?.score?.toFixed(2) ?? "—"}</p>
                       <p className="text-sm text-gray-300">{a?.reason ?? "—"}</p>
                     </div>
-                    <div>
+                    <div className="bg-gray-800 rounded-lg p-3">
                       <p className="text-xs text-gray-500 mb-1">Run B — {b?.score?.toFixed(2) ?? "—"}</p>
                       <p className="text-sm text-gray-300">{b?.reason ?? "—"}</p>
                     </div>
