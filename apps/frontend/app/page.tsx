@@ -53,12 +53,10 @@ export default function HomePage() {
   const [showForm, setShowForm] = useState(false);
   const [rerunning, setRerunning] = useState<string | null>(null);
 
-  // Inline label editing
   const [editingLabel, setEditingLabel] = useState<string | null>(null);
   const [editLabelValue, setEditLabelValue] = useState("");
   const [savingLabel, setSavingLabel] = useState<string | null>(null);
 
-  // Form state
   const [project, setProject] = useState("demo-project");
   const [variant, setVariant] = useState("v1");
   const [runLabel, setRunLabel] = useState("");
@@ -74,7 +72,6 @@ export default function HomePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  // Scenario library
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const [saveLibName, setSaveLibName] = useState("");
   const [showSaveLib, setShowSaveLib] = useState(false);
@@ -244,7 +241,6 @@ export default function HomePage() {
 
   return (
     <main className="max-w-6xl mx-auto p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
@@ -269,7 +265,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Stats */}
       {!loading && runs.length > 0 && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
@@ -288,7 +283,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Spark chart */}
       {!loading && sparkData.length >= 2 && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Recent Score Trend (last {sparkData.length} runs)</h2>
@@ -305,7 +299,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* New Run Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -315,24 +308,24 @@ export default function HomePage() {
                 <label className="block text-sm text-gray-400 mb-1">Run label <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={runLabel} onChange={(e) => setRunLabel(e.target.value)}
                   placeholder="e.g. GPT-4 baseline, Tuesday QA test"
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Project name</label>
                   <input type="text" value={project} onChange={(e) => setProject(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Variant name</label>
                   <input type="text" value={variant} onChange={(e) => setVariant(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
                 </div>
               </div>
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Model</label>
                 <select value={modelName} onChange={(e) => setModelName(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
                   {availableModels.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -345,7 +338,7 @@ export default function HomePage() {
                     {savedScenarios.length > 0 && (
                       <select
                         onChange={(e) => { if (e.target.value) handleLoadFromLibrary(e.target.value); e.target.value = ""; }}
-                        className="bg-gray-800 border border-gray-600 rounded-lg px-2 py-1 text-gray-300 text-xs focus:outline-none focus:border-blue-500"
+                        className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-300 text-xs focus:outline-none focus:border-blue-500"
                         defaultValue=""
                       >
                         <option value="" disabled>📚 Load saved…</option>
@@ -354,7 +347,7 @@ export default function HomePage() {
                         ))}
                       </select>
                     )}
-                    <div className="flex bg-gray-800 border border-gray-600 rounded-lg p-0.5 text-xs">
+                    <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 text-xs">
                       <button type="button" onClick={() => setYamlMode("editor")}
                         className={`px-3 py-1 rounded-md transition-colors ${yamlMode === "editor" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
                         ✏️ Editor
@@ -370,12 +363,12 @@ export default function HomePage() {
                   <div className="relative">
                     <textarea value={scenariosYaml} onChange={(e) => setScenariosYaml(e.target.value)}
                       rows={10} spellCheck={false} placeholder={SAMPLE_YAML}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
                     <button type="button" onClick={() => setScenariosYaml(SAMPLE_YAML)}
                       className="absolute top-2 right-2 text-xs text-gray-500 hover:text-gray-300 bg-gray-900 border border-gray-700 rounded px-2 py-0.5">Load sample</button>
                   </div>
                 ) : (
-                  <label className="flex items-center gap-3 cursor-pointer w-full bg-gray-800 border border-gray-600 hover:border-blue-500 rounded-lg px-3 py-2 text-sm transition-colors">
+                  <label className="flex items-center gap-3 cursor-pointer w-full bg-gray-800 border border-gray-700 hover:border-blue-500 rounded-lg px-3 py-2 text-sm transition-colors">
                     <span className="text-blue-400">📂 Choose file</span>
                     <span className="text-gray-400 truncate">{fileName || "No file chosen"}</span>
                     <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
@@ -390,7 +383,7 @@ export default function HomePage() {
                       <div className="flex items-center gap-2">
                         <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
                           placeholder="Scenario set name…"
-                          className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500" />
+                          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500" />
                         <button type="button" onClick={handleSaveToLibrary}
                           className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition-colors">Save</button>
                         <button type="button" onClick={() => setShowSaveLib(false)}
@@ -415,7 +408,7 @@ export default function HomePage() {
                 <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={appUrl} onChange={(e) => setAppUrl(e.target.value)}
                   placeholder="https://your-app.com/answer"
-                  className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
                 <p className="text-xs text-gray-500 mt-1">POST {`{ question, context }`} → expects {`{ answer }`}. Leave blank for echo mode.</p>
               </div>
               <div>
@@ -428,7 +421,7 @@ export default function HomePage() {
                   <div className="mt-2">
                     <textarea value={rubric} onChange={(e) => setRubric(e.target.value)}
                       rows={5} placeholder={DEFAULT_RUBRIC_TEXT}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
+                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
                     <p className="text-xs text-gray-500 mt-1">Leave blank to use the default rubric.</p>
                   </div>
                 )}
@@ -453,7 +446,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Runs table */}
       {loading ? (
         <div className="space-y-3">
           {[...Array(4)].map((_, i) => (
@@ -490,7 +482,7 @@ export default function HomePage() {
                 const pass = scores.length ? (scores.filter((s) => s >= 0.8).length / scores.length) * 100 : 0;
                 const isEditing = editingLabel === run.run_id;
                 return (
-                  <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
+                  <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-800"}>
                     <td className="px-4 py-3">
                       {isEditing ? (
                         <div className="flex items-center gap-1">

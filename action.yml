@@ -14,7 +14,7 @@ inputs:
     description: 'Your LLM Test Lab API token'
     required: true
   app-url:
-    description: 'The AI app endpoint to evaluate (must accept POST with {"question": "..."}  and return {"answer": "..."})\''
+    description: "The AI app endpoint to evaluate (must accept POST with {'question': '...'} and return {'answer': '...'})"
     required: true
   scenarios:
     description: 'Path to your scenarios YAML file'
@@ -29,7 +29,7 @@ inputs:
     required: false
     default: 'llama-3.1-8b-instant'
   fail-under:
-    description: 'Minimum average score (0.0–1.0) — CI fails if score drops below this'
+    description: 'Minimum average score (0.0-1.0) — CI fails if score drops below this'
     required: false
     default: '0.6'
   variant:
