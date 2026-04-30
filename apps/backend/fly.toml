@@ -1,36 +1,11 @@
-# fly.toml — LLM Test Lab backend
-# Deploy from repo root: fly deploy --config apps/backend/fly.toml
-# Working directory is apps/backend, so all paths here are relative to that.
-
-app = "llm-test-lab-backend"
-primary_region = "lhr"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  PORT             = "8080"
-  PYTHONUNBUFFERED = "1"
-
-[http_service]
-  internal_port       = 8080
-  force_https         = true
-  auto_stop_machines  = true
-  auto_start_machines = true
-  min_machines_running = 0
-
-  [http_service.concurrency]
-    type       = "requests"
-    hard_limit = 25
-    soft_limit = 20
-
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval     = "30s"
-    method       = "GET"
-    path         = "/health"
-    timeout      = "5s"
-
-[[vm]]
-  size   = "shared-cpu-1x"
-  memory = "512mb"
+# !! This file is intentionally minimal.
+# The canonical fly.toml lives at the REPO ROOT (fly.toml)
+# because the Docker build context must include packages/core-python
+# and packages/sdk-python which are outside this directory.
+#
+# Deploy from repo root:
+#   fly deploy --config fly.toml --remote-only
+#
+# Fly.io UI settings:
+#   Working directory : (leave empty)
+#   Config path       : fly.toml
