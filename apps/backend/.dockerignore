@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Local DB
+*.db
+*.db-journal
+*.sqlite3
+
+# Secrets / env
+.env
+.env.*
+
+# Tests
+tests/
+
+# Render-specific (not needed in Fly image)
+Procfile
+
+# Misc
+.git/
+.gitignore
+*.md
