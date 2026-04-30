@@ -1,25 +1,82 @@
 # 🧪 LLM Test Lab
 
-> Evaluate, score, and compare LLM outputs before your users do.
+> Evaluate your AI app before your users do.
 
-LLM Test Lab is an open-source evaluation platform for AI applications. Run your prompts across multiple models, score outputs automatically, track quality over time, and detect drift before it reaches production.
+[![CI](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml/badge.svg)](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/seeshuraj/llm-test-lab?style=social)](https://github.com/seeshuraj/llm-test-lab/stargazers)
 
-🌐 **Live Demo:** [llm-test-lab-psi.vercel.app](https://llm-test-lab-psi.vercel.app)  
-📋 **Eval Engine:** [llm-test-lab-psi.vercel.app/eval](https://llm-test-lab-psi.vercel.app/eval)  
-![CI](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml/badge.svg)
+LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at any RAG pipeline or LLM endpoint — it scores every answer on faithfulness, relevancy, and grounding, tracks quality over time, and fails your CI when regressions slip through.
+
+🌐 **Live App:** [llm-test-lab-app.vercel.app](https://llm-test-lab-app.vercel.app)  
+🏠 **Landing:** [llm-test-lab-psi.vercel.app](https://llm-test-lab-psi.vercel.app)  
+📦 **Backend API:** [llm-test-lab.fly.dev](https://llm-test-lab.fly.dev/health)
 
 ---
 
 ## ✨ Features
 
-- **Multi-model comparison** — Run prompts across Llama 3.3 70B, Llama 3.1 8B, and more in parallel
-- **Automated scoring** — Keyword + LLM-judge scoring against expected outputs
-- **Latency tracking** — Per-model response time benchmarking
-- **RAG evaluation** — Score Context Relevance, Faithfulness, and Answer Relevance via sentence-transformers embeddings
-- **Score history** — Full run history persisted to Supabase (PostgreSQL)
-- **A/B prompt comparison** — Compare two prompt variants side by side
-- **CI/CD integration** — Auto-run evals on every push via GitHub Actions
-- **Email alerts** — Notify when score drops below your threshold
+- **RAG metrics** — Faithfulness, Context Recall, Answer Relevancy, Context Precision
+- **LLM-as-judge scoring** — Automated 0–1 scores via Groq (Llama 3.1/3.3)
+- **Score trend charts** — Track quality over time per project
+- **A/B comparison** — Side-by-side score deltas between two runs
+- **Latency tracking** — Real response time per scenario
+- **CI/CD integration** — GitHub Action that fails your build on regressions
+- **Works with any HTTP endpoint** — No SDK required
+- **Email alerts** — Notify when score drops below threshold
+
+---
+
+## ⚡ Quickstart (3 commands)
+
+```bash
+git clone https://github.com/seeshuraj/llm-test-lab.git && cd llm-test-lab
+pip install -r apps/backend/requirements.txt && cp apps/backend/.env.example apps/backend/.env
+# Set GROQ_API_KEY in apps/backend/.env, then:
+uvicorn apps.backend.app.main:app --reload
+```
+
+Frontend:
+```bash
+cd apps/frontend && npm install && cp .env.example .env.local && npm run dev
+```
+
+---
+
+## 🔌 GitHub Action — Add to Your Repo
+
+Add automated evals to **any** repo in 10 lines:
+
+```yaml
+# .github/workflows/eval.yml
+name: LLM Eval
+on: [push]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seeshuraj/llm-test-lab@v1
+        with:
+          api-url: ${{ vars.LLM_TEST_LAB_API_URL }}
+          token:   ${{ secrets.LLM_TEST_LAB_TOKEN }}
+          app-url: https://your-ai-app.com/answer
+          scenarios: scenarios.yaml
+          fail-under: '0.7'
+```
+
+**Inputs:**
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `api-url` | ✅ | — | Your LLM Test Lab backend URL |
+| `token` | ✅ | — | API token from your dashboard |
+| `app-url` | ✅ | — | Your AI app's answer endpoint |
+| `scenarios` | — | `scenarios.yaml` | Path to scenarios file |
+| `project` | — | `my-project` | Project name for grouping runs |
+| `model` | — | `llama-3.1-8b-instant` | Judge model |
+| `fail-under` | — | `0.6` | Fail CI if avg score drops below this |
 
 ---
 
@@ -27,112 +84,75 @@ LLM Test Lab is an open-source evaluation platform for AI applications. Run your
 
 ```
 llm-test-lab/
-├── landing/            # Next.js landing page (Vercel)
+├── action.yml              # Reusable GitHub Action
+├── landing/                # Next.js landing page (Vercel)
 ├── apps/
-│   ├── backend/        # FastAPI scoring engine + REST API (Render)
-│   └── frontend/       # Main app: auth, dashboard, run history (Vercel)
+│   ├── backend/            # FastAPI scoring engine + REST API (Fly.io)
+│   └── frontend/           # Dashboard: auth, runs, compare, trends (Vercel)
 ├── packages/
-│   ├── core-python/    # Shared Python models + judges
-│   └── sdk-python/     # Python SDK (pip install coming soon)
-├── cli/                # llm_eval.py — CI integration script
-└── .github/workflows/  # CI: unit tests + LLM eval on every push
+│   ├── core-python/        # Shared Python judges + scoring
+│   └── sdk-python/         # Python SDK
+├── cli/
+│   └── llm_eval.py         # CI script invoked by action.yml
+└── .github/workflows/      # CI: unit tests + LLM eval on push to main
 ```
 
-**Deployment stack:**
 | Layer | Host |
 |---|---|
 | Frontend (Next.js) | Vercel |
-| Backend (FastAPI) | Render |
+| Backend (FastAPI) | Fly.io |
 | Database | Supabase (PostgreSQL) |
-
----
-
-## 🚀 Getting Started
-
-### Backend (FastAPI)
-```bash
-cd apps/backend
-pip install -r requirements.txt
-cp .env.example .env
-# Fill in GROQ_API_KEY + SUPABASE_DB_URL (or leave blank for SQLite locally)
-uvicorn app.main:app --reload
-```
-
-### Frontend (Next.js)
-```bash
-cd apps/frontend
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-### Run unit tests
-```bash
-pip install pytest
-pytest apps/backend/tests/ -v
-```
 
 ---
 
 ## 🔑 Environment Variables
 
-### ⚡ Important: two different Supabase variable types
-
-| Variable | Used by | What it is |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Frontend (Vercel / Render) | Your Supabase project URL — safe to expose |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend (Vercel / Render) | Supabase anon key for the JS client — safe to expose |
-| `SUPABASE_DB_URL` | **Backend (Render)** | Direct PostgreSQL connection string — **keep secret** |
-
-The backend does **not** use the anon key. It connects directly to Postgres via SQLAlchemy. Set `SUPABASE_DB_URL` in Render > your backend service > Environment.
-
-### Backend env vars (Render service)
+### Backend (Fly.io secrets)
 
 | Variable | Required | Description |
 |---|---|---|
 | `GROQ_API_KEY` | ✅ | [console.groq.com](https://console.groq.com) |
-| `SUPABASE_DB_URL` | ✅ | Supabase connection string: `postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres` |
-| `SECRET_KEY` | ✅ | Random string for JWT signing — generate with `openssl rand -hex 32` |
-| `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated: `https://llm-test-lab-psi.vercel.app,https://your-app.vercel.app` |
-| `RESEND_API_KEY` | optional | [resend.com](https://resend.com) — enables email score alerts |
-| `FROM_EMAIL` | optional | Sender address for alerts (default: `onboarding@resend.dev`) |
-| `APP_URL` | optional | Your frontend URL, used in alert email links |
+| `SUPABASE_DB_URL` | ✅ | `postgresql://postgres:[pass]@db.[ref].supabase.co:5432/postgres` |
+| `SECRET_KEY` | ✅ | `openssl rand -hex 32` |
+| `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs |
+| `RESEND_API_KEY` | optional | Email alerts via [resend.com](https://resend.com) |
 
-> **Local dev:** If `SUPABASE_DB_URL` is not set, the backend falls back to `llm_test_lab.db` (SQLite). No setup needed.
-
-### Frontend env vars (Vercel)
+### Frontend (Vercel env vars)
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Your Render backend URL e.g. `https://llm-test-lab.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | Backend URL: `https://llm-test-lab.fly.dev` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 
-### CI (GitHub Actions)
+### GitHub Actions
 
-| Name | Type | Where to add | Description |
-|---|---|---|---|
-| `LLM_TEST_LAB_TOKEN` | Secret | Settings → Secrets → Actions | API token from your LLM Test Lab dashboard |
-| `LLM_TEST_LAB_API_URL` | Variable | Settings → Variables → Actions | Your Render backend URL |
+| Name | Type | Description |
+|---|---|---|
+| `LLM_TEST_LAB_TOKEN` | Secret | API token from dashboard |
+| `LLM_TEST_LAB_API_URL` | Variable | `https://llm-test-lab.fly.dev` |
+
+> **Local dev:** If `SUPABASE_DB_URL` is not set, backend falls back to SQLite automatically.
 
 ---
 
 ## 📊 Roadmap
 
 - [x] Multi-model eval engine
-- [x] Latency benchmarking
-- [x] LLM judge scoring (Groq)
-- [x] RAG evaluation (faithfulness, context recall, answer relevancy)
-- [x] Score history persisted to Supabase (PostgreSQL)
+- [x] LLM-as-judge scoring (Groq)
+- [x] RAG evaluation (faithfulness, context recall, answer relevancy, context precision)
+- [x] Score history in Supabase
 - [x] Auth + personal dashboards
-- [x] API keys for CI/CD integration
-- [x] CI/CD GitHub Actions integration
+- [x] A/B comparison
+- [x] Score trend charts
+- [x] CI/CD GitHub Action (`uses: seeshuraj/llm-test-lab@v1`)
 - [x] Email alerts on score regression
-- [x] Unit tests for scoring logic
-- [ ] Semantic scoring via sentence-transformers embeddings
-- [ ] Stripe billing
-- [ ] npm / PyPI SDK packages
+- [x] Deployed on Fly.io (always-on)
+- [ ] Stripe billing (Free / Pro / Teams)
 - [ ] Slack / webhook notifications
+- [ ] Drift detection alerts
+- [ ] npm / PyPI SDK packages
+- [ ] Live demo (no signup)
 
 ---
 
@@ -140,27 +160,23 @@ The backend does **not** use the anon key. It connects directly to Postgres via 
 
 | Layer | Tech |
 |---|---|
-| **Frontend** | Next.js, TypeScript, Tailwind CSS, Vercel |
-| **Backend** | FastAPI, Python 3.11, SQLAlchemy (asyncpg), Render |
-| **Database** | Supabase (PostgreSQL) — SQLite for local dev |
-| **AI / Judges** | Groq (Llama 3.1, 3.3), sentence-transformers |
-| **Auth** | JWT (python-jose + bcrypt) |
-| **CI** | GitHub Actions |
-| **Email** | Resend |
+| Frontend | Next.js 16, TypeScript, Tailwind CSS |
+| Backend | FastAPI, Python 3.11, SQLAlchemy |
+| Database | Supabase (PostgreSQL) / SQLite (local) |
+| AI / Judges | Groq — Llama 3.1 8B, Llama 3.3 70B |
+| Auth | JWT (python-jose + bcrypt) |
+| CI | GitHub Actions |
+| Hosting | Fly.io + Vercel |
+| Email | Resend |
 
 ---
 
-## 📢 CI Integration
+## 🤝 Contributing
 
-Every push to `main` runs two jobs:
-
-1. **Unit tests** — validates cosine similarity, JSON extraction, RagScores
-2. **LLM eval** — runs `scenarios.yaml` against your deployed backend and fails if avg score < 0.6
-
-See `.github/workflows/llm-eval.yml` and `cli/llm_eval.py`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — especially new eval metrics, scenario templates, and SDK improvements.
 
 ---
 
 ## 📄 License
 
-MIT
+[MIT](LICENSE) © 2026 [Seeshuraj Bhoopalan](https://github.com/seeshuraj)

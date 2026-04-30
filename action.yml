@@ -1,0 +1,75 @@
+name: 'LLM Test Lab Eval'
+description: 'Run automated LLM evaluations against your AI app and fail CI if quality drops below threshold'
+author: 'seeshuraj'
+
+branding:
+  icon: 'activity'
+  color: 'blue'
+
+inputs:
+  api-url:
+    description: 'Your LLM Test Lab backend URL (e.g. https://llm-test-lab.fly.dev)'
+    required: true
+  token:
+    description: 'Your LLM Test Lab API token'
+    required: true
+  app-url:
+    description: 'The AI app endpoint to evaluate (must accept POST with {"question": "..."}  and return {"answer": "..."})\''
+    required: true
+  scenarios:
+    description: 'Path to your scenarios YAML file'
+    required: false
+    default: 'scenarios.yaml'
+  project:
+    description: 'Project name to group runs under'
+    required: false
+    default: 'my-project'
+  model:
+    description: 'Judge model to use for scoring'
+    required: false
+    default: 'llama-3.1-8b-instant'
+  fail-under:
+    description: 'Minimum average score (0.0–1.0) — CI fails if score drops below this'
+    required: false
+    default: '0.6'
+  variant:
+    description: 'Variant label for this run (defaults to commit SHA)'
+    required: false
+    default: '${{ github.sha }}'
+  run-label:
+    description: 'Human-readable label for this run'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install CLI deps
+      shell: bash
+      run: pip install pyyaml requests
+
+    - name: Run LLM Test Lab evaluation
+      shell: bash
+      env:
+        LLM_TEST_LAB_TOKEN: ${{ inputs.token }}
+      run: |
+        LABEL="${{ inputs.run-label }}"
+        if [ -z "$LABEL" ]; then
+          LABEL="CI: ${{ github.ref_name }} @ $(echo '${{ github.sha }}' | cut -c1-7)"
+        fi
+
+        python ${{ github.action_path }}/cli/llm_eval.py \
+          --api-url "${{ inputs.api-url }}" \
+          --token   "$LLM_TEST_LAB_TOKEN" \
+          --scenarios "${{ inputs.scenarios }}" \
+          --project "${{ inputs.project }}" \
+          --variant "${{ inputs.variant }}" \
+          --run-label "$LABEL" \
+          --model "${{ inputs.model }}" \
+          --app-url "${{ inputs.app-url }}" \
+          --fail-under ${{ inputs.fail-under }}
