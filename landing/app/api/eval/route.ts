@@ -2,12 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabase } from "@/lib/supabase";
 
-const groq = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: "https://api.groq.com/openai/v1",
-});
+// Lazy-initialize so the client is only created at runtime (not at build time)
+// Avoids: "Missing credentials" error when GROQ_API_KEY is not set during Vercel build
+function getGroqClient() {
+  return new OpenAI({
+    apiKey: process.env.GROQ_API_KEY,
+    baseURL: "https://api.groq.com/openai/v1",
+  });
+}
 
 async function runGroq(model: string, prompt: string) {
+  const groq = getGroqClient();
   const start = Date.now();
   const res = await groq.chat.completions.create({
     model,
@@ -41,7 +46,6 @@ export async function POST(req: NextRequest) {
     score: scoreOutput(r.output, expected),
   }));
 
-  // Save each result to Supabase
   await supabase.from("eval_runs").insert(
     results.map((r) => ({
       prompt,
