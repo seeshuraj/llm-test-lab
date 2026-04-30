@@ -5,8 +5,8 @@
 # Deploy:  fly deploy --config fly.toml --remote-only
 # UI:      Working directory = (empty)   Config path = fly.toml
 
-app            = "llm-test-lab-backend"
-primary_region = "lhr"   # London — closest to Dublin
+app            = "llm-test-lab"
+primary_region = "lhr"
 
 [build]
   dockerfile = "apps/backend/Dockerfile"
