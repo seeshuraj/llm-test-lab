@@ -1,6 +1,8 @@
 import os
 import uuid
 import time
+import logging
+import json
 from datetime import datetime, timezone
 from typing import List, Optional
 from collections import defaultdict
@@ -11,6 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from .auth import router as auth_router, get_current_user
 from .notifications import router as notifications_router, check_and_notify
@@ -24,12 +30,43 @@ from llm_test_lab_core.judges_groq import GroqJudgeClient
 from llm_test_lab.scenarios_yaml import load_scenarios_from_string
 from llm_test_lab.runner_local import run_suite
 
-app = FastAPI(title="LLM Test Lab API")
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("llm_test_lab")
 
 # ---------------------------------------------------------------------------
-# CORS — restrict origins via env var in production
-# Set CORS_ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
-# Defaults to * for local dev only
+# Rate limiter
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address)
+
+app = FastAPI(title="LLM Test Lab API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ---------------------------------------------------------------------------
+# Request logging middleware
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = round((time.monotonic() - start) * 1000, 1)
+    log_entry = {
+        "method": request.method,
+        "path": request.url.path,
+        "status": response.status_code,
+        "ip": request.client.host if request.client else "unknown",
+        "duration_ms": duration_ms,
+        "user_agent": request.headers.get("user-agent", ""),
+        "ts": datetime.utcnow().isoformat(),
+    }
+    logger.info(json.dumps(log_entry))
+    return response
+
+# ---------------------------------------------------------------------------
+# CORS
 # ---------------------------------------------------------------------------
 _raw_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "*")
 _ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
@@ -61,9 +98,6 @@ SUPPORTED_MODELS = [
     "llama-3.3-70b-versatile",
 ]
 
-# Timeout for calls to the user's app endpoint.
-# 90s default handles Render free-tier cold starts (~50s worst case).
-# Override per-deploy with APP_ENDPOINT_TIMEOUT env var.
 _APP_ENDPOINT_TIMEOUT = float(os.environ.get("APP_ENDPOINT_TIMEOUT", "90"))
 
 _user_last_run: dict[str, float] = defaultdict(float)
@@ -134,11 +168,6 @@ class RunOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 async def _build_run_out(run: Run, results: list) -> RunOut:
-    """Build RunOut from a Run ORM object + list of RunScenarioResult ORM objects.
-
-    IMPORTANT: `results` must be RunScenarioResult DB rows, NOT runner ScenarioResult
-    objects. Runner objects don't have .rag_scores and will raise AttributeError.
-    """
     avg = sum(r.score for r in results) / len(results) if results else 0.0
     return RunOut(
         run_id=run.id,
@@ -190,7 +219,9 @@ def list_models():
 
 
 @app.post("/api/run-local", response_model=RunOut)
+@limiter.limit("5/minute")
 async def run_local(
+    request: Request,
     req: RunLocalRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -325,11 +356,8 @@ async def run_local(
         db_scenario_results.append(db_row)
 
     await db.commit()
-    # Refresh db_run so ORM fields like created_at are populated from the DB
     await db.refresh(db_run)
 
-    # Fire email notification using a FRESH session — never reuse the
-    # already-committed request session (causes asyncpg InterfaceError -> 500)
     avg_score_val = (
         sum(r.score for r in run_result.results) / len(run_result.results)
         if run_result.results else 0.0
@@ -345,10 +373,8 @@ async def run_local(
                 db=notify_db,
             )
     except Exception as e:
-        # Notification failure must never crash the run response
-        print(f"[main] notification error (non-fatal): {e}")
+        logger.warning(f"[main] notification error (non-fatal): {e}")
 
-    # Pass DB rows (have .rag_scores) — NOT runner result objects
     return await _build_run_out(db_run, db_scenario_results)
 
 
@@ -372,8 +398,10 @@ async def update_run_label(
 
 
 @app.post("/api/runs/{run_id}/rerun", response_model=RunOut)
+@limiter.limit("5/minute")
 async def rerun(
     run_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -397,7 +425,7 @@ async def rerun(
         rubric=original.rubric,
         app_endpoint_url=original.app_endpoint_url,
     )
-    return await run_local(req, db, current_user)
+    return await run_local(request, req, db, current_user)
 
 
 @app.get("/api/runs", response_model=List[RunOut])

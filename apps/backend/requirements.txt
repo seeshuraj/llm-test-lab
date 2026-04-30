@@ -12,6 +12,7 @@ pyyaml
 groq
 sentence-transformers
 numpy
+slowapi==0.1.9
 # core-python and sdk-python are installed directly by the Dockerfile
 # via: pip install -e /packages/core-python -e /packages/sdk-python
 # DO NOT add -e ../../packages/* here — those relative paths break Docker builds
