@@ -17,12 +17,7 @@ LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at 
 
 ## 🎬 Demo
 
-<!-- DEMO: Replace the line below with your GIF/video once recorded -->
-> 📹 **Demo coming soon** — run `python cli/llm_eval.py --scenarios scenarios.yaml` to see it in action locally.
-
-<!-- Once you have a GIF, replace the line above with:
-![LLM Test Lab Demo](https://your-url/demo.gif)
--->
+LLM-Test-Lab.gif
 
 ---
 
