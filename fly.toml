@@ -1,39 +1,37 @@
-# fly.toml — LLM Test Lab backend
-# MUST live at repo root so Docker build context = full repo
-# (packages/core-python and packages/sdk-python are outside apps/backend/)
+# fly.toml app configuration file generated for llm-test-lab on 2026-04-30T13:43:07Z
 #
-# Deploy:  fly deploy --config fly.toml --remote-only
-# UI:      Working directory = (empty)   Config path = fly.toml
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app            = "llm-test-lab-backend"
-primary_region = "lhr"   # London — closest to Dublin
+app = 'llm-test-lab'
+primary_region = 'lhr'
 
 [build]
-  dockerfile = "apps/backend/Dockerfile"
+  dockerfile = 'apps/backend/Dockerfile'
 
 [env]
-  PORT             = "8080"
-  PYTHONUNBUFFERED = "1"
+  PORT = '8080'
+  PYTHONUNBUFFERED = '1'
 
 [http_service]
-  internal_port        = 8080
-  force_https          = true
-  auto_stop_machines   = true
-  auto_start_machines  = true
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
   min_machines_running = 0
 
   [http_service.concurrency]
-    type       = "requests"
+    type = 'requests'
     hard_limit = 25
     soft_limit = 20
 
   [[http_service.checks]]
-    grace_period = "10s"
-    interval     = "30s"
-    method       = "GET"
-    path         = "/health"
-    timeout      = "5s"
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/health'
 
 [[vm]]
-  size   = "shared-cpu-1x"
-  memory = "512mb"
+  size = 'shared-cpu-1x'
+  memory = '512mb'
