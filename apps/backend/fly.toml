@@ -1,31 +1,22 @@
 # fly.toml — LLM Test Lab backend
-# Deploy: fly deploy --config apps/backend/fly.toml
+# Deploy from repo root: fly deploy --config apps/backend/fly.toml
+# Working directory is apps/backend, so all paths here are relative to that.
 
 app = "llm-test-lab-backend"
-primary_region = "lhr"   # London — closest to Dublin
+primary_region = "lhr"
 
 [build]
-  dockerfile = "apps/backend/Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
-  PORT           = "8080"
+  PORT             = "8080"
   PYTHONUNBUFFERED = "1"
-  # All secrets set via: fly secrets set KEY=value --app llm-test-lab-backend
-  # Required secrets:
-  #   GROQ_API_KEY
-  #   SECRET_KEY          (JWT signing key — any 32+ char random string)
-  #   SUPABASE_DB_URL     (postgres://... from Supabase project settings)
-  #   CORS_ALLOWED_ORIGINS  (https://llm-test-lab-app.vercel.app,https://llm-test-lab-psi.vercel.app)
-  # Optional:
-  #   RESEND_API_KEY
-  #   FROM_EMAIL
-  #   APP_URL
 
 [http_service]
   internal_port       = 8080
   force_https         = true
-  auto_stop_machines  = true   # stops after 5 min idle (saves free allowance)
-  auto_start_machines = true   # wakes on first request (~1-2s cold start vs Render's 30s)
+  auto_stop_machines  = true
+  auto_start_machines = true
   min_machines_running = 0
 
   [http_service.concurrency]
@@ -33,13 +24,13 @@ primary_region = "lhr"   # London — closest to Dublin
     hard_limit = 25
     soft_limit = 20
 
-[[vm]]
-  size   = "shared-cpu-1x"   # free tier: 3 shared-cpu-1x machines included
-  memory = "512mb"
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval     = "30s"
+    method       = "GET"
+    path         = "/health"
+    timeout      = "5s"
 
-[[services.http_checks]]
-  grace_period   = "10s"
-  interval       = "30s"
-  method         = "GET"
-  path           = "/health"
-  timeout        = "5s"
+[[vm]]
+  size   = "shared-cpu-1x"
+  memory = "512mb"
