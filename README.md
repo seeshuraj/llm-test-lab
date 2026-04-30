@@ -9,15 +9,21 @@
 
 LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at any RAG pipeline or LLM endpoint — it scores every answer on faithfulness, relevancy, and grounding, tracks quality over time, and fails your CI when regressions slip through.
 
-🌐 **Live App:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)  
-📦 **Backend API:** [llm-test-lab-api.fly.dev/health](https://llm-test-lab-api.fly.dev/health)  
+🌐 **Live App:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)
+📦 **Backend API:** [llm-test-lab-api.fly.dev/health](https://llm-test-lab-api.fly.dev/health)
 🛒 **GitHub Marketplace:** [LLM Test Lab Eval](https://github.com/marketplace/actions/llm-test-lab-eval)
 
 ---
 
-## 🎬 Demo
+## 🎬 Dashboard Demo
 
-LLM-Test-Lab.gif
+![LLM Test Lab Dashboard](LLM-Test-Lab.gif)
+
+---
+
+## 🏠 Landing Page
+
+![LLM Test Lab Landing Page](Landing-Page.gif)
 
 ---
 
