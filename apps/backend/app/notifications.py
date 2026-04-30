@@ -129,6 +129,74 @@ def _send_alert_email(to: str, project: str, run_id: str, avg_score: float, thre
         return False
 
 
+def _send_slack_webhook(
+    project: str, run_id: str, avg_score: float, threshold: float
+) -> bool:
+    """POST a score regression alert to a Slack incoming webhook.
+    Set SLACK_WEBHOOK_URL in your environment to enable.
+    """
+    webhook_url = os.getenv("SLACK_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+    app_url = os.getenv("APP_URL", "https://llm-test-lab-app.vercel.app")
+    run_url = f"{app_url}/runs/{run_id}"
+    try:
+        resp = httpx.post(
+            webhook_url,
+            json={
+                "text": f":warning: LLM score regression detected in *{project}*",
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                f":warning: *Score regression — {project}*\n"
+                                f"Score: *{avg_score:.2f}* (threshold: {threshold})\n"
+                                f"<{run_url}|View run results>"
+                            ),
+                        },
+                    }
+                ],
+            },
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        print(f"[notifications] Slack webhook error: {e}")
+        return False
+
+
+def _send_generic_webhook(
+    project: str, run_id: str, avg_score: float, threshold: float
+) -> bool:
+    """POST a JSON payload to a generic HTTP webhook endpoint.
+    Set ALERT_WEBHOOK_URL in your environment to enable.
+    Useful for Datadog, PagerDuty, custom Slack bots, etc.
+    """
+    webhook_url = os.getenv("ALERT_WEBHOOK_URL")
+    if not webhook_url:
+        return False
+    app_url = os.getenv("APP_URL", "https://llm-test-lab-app.vercel.app")
+    try:
+        resp = httpx.post(
+            webhook_url,
+            json={
+                "project": project,
+                "run_id": run_id,
+                "avg_score": round(avg_score, 4),
+                "threshold": threshold,
+                "passed": False,
+                "dashboard_url": f"{app_url}/runs/{run_id}",
+            },
+            timeout=10,
+        )
+        return resp.status_code < 300
+    except Exception as e:
+        print(f"[notifications] generic webhook error: {e}")
+        return False
+
+
 async def check_and_notify(
     user_id: str,
     user_email: str,
@@ -137,7 +205,7 @@ async def check_and_notify(
     avg_score: float,
     db: AsyncSession
 ):
-    """Called after every run to auto-alert if score < user threshold."""
+    """Called after every run. Fires email + Slack + generic webhook if score < threshold."""
     await _ensure_table(db)
     result = await db.execute(
         text("SELECT email, threshold, enabled FROM notification_settings WHERE user_id=:uid"),
@@ -151,4 +219,15 @@ async def check_and_notify(
         return
     if avg_score < threshold:
         print(f"[notifications] Score {avg_score:.3f} < {threshold} — alerting {email}")
-        _send_alert_email(to=email, project=project, run_id=run_id, avg_score=avg_score, threshold=threshold)
+        _send_alert_email(
+            to=email, project=project, run_id=run_id,
+            avg_score=avg_score, threshold=threshold
+        )
+        _send_slack_webhook(
+            project=project, run_id=run_id,
+            avg_score=avg_score, threshold=threshold
+        )
+        _send_generic_webhook(
+            project=project, run_id=run_id,
+            avg_score=avg_score, threshold=threshold
+        )
