@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, sta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -45,12 +45,22 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Ensure is_public column exists for existing deployments (safe no-op if already present)
+    async for db in get_db():
+        try:
+            await db.execute(text(
+                "ALTER TABLE runs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            await db.commit()
+        except Exception as exc:
+            logger.warning("Migration skip (is_public): %s", exc)
+        break
     yield
 
 
 app = FastAPI(
     title="LLM Test Lab API",
-    version="0.4.0",
+    version="0.5.0",
     lifespan=lifespan,
 )
 
@@ -112,7 +122,6 @@ class RunRequest(BaseModel):
     scenarios_yaml: Optional[str] = None
     rubric: Optional[str] = None
     app_endpoint_url: Optional[str] = None
-    # Epic 4: optionally pin a dataset version to this run
     dataset_version_id: Optional[str] = None
 
 
@@ -139,6 +148,7 @@ class RunOut(BaseModel):
     mean_score: float
     results: list[ScenarioResultOut]
     dataset_version_id: Optional[str] = None
+    is_public: bool = False
 
 
 class RunSummaryOut(BaseModel):
@@ -150,6 +160,33 @@ class RunSummaryOut(BaseModel):
     created_at: Optional[datetime]
     mean_score: float
     dataset_version_id: Optional[str] = None
+    is_public: bool = False
+
+
+# Schema for the public share endpoint — matches the frontend Run type exactly
+class ShareScenarioResultOut(BaseModel):
+    scenario_id: str
+    score: float
+    latency_ms: float
+    reason: str
+    judge_model: str
+    faithfulness: Optional[float] = None
+    context_precision: Optional[float] = None
+    answer_relevance: Optional[float] = None
+
+
+class ShareRunOut(BaseModel):
+    run_id: str
+    project: str
+    variant_name: str
+    model_name: str
+    created_at: Optional[datetime]
+    avg_score: float
+    results: list[ShareScenarioResultOut]
+
+
+class ShareToggleRequest(BaseModel):
+    is_public: bool
 
 
 # ---------------------------------------------------------------------------
@@ -233,14 +270,27 @@ async def _get_llm_answer(
             data = resp.json()
             answer = data.get("answer") or data.get("response") or str(data)
     else:
-        # Use Groq / Anthropic directly
         judge = judge_factory(model_name)
         answer = await judge.complete(question=question, context=context)
     latency_ms = (time.monotonic() - t0) * 1000
     return answer, latency_ms
 
 
-@app.post("/runs", response_model=RunOut, status_code=201)
+def _build_share_result(r: RunScenarioResult) -> ShareScenarioResultOut:
+    rag = r.rag_scores or {}
+    return ShareScenarioResultOut(
+        scenario_id=r.scenario_id,
+        score=r.score,
+        latency_ms=r.latency_ms,
+        reason=r.reason,
+        judge_model=r.judge_model,
+        faithfulness=rag.get("faithfulness"),
+        context_precision=rag.get("context_precision"),
+        answer_relevance=rag.get("answer_relevancy"),
+    )
+
+
+@app.post("/api/runs", response_model=RunOut, status_code=201)
 async def create_run(
     body: RunRequest,
     db: AsyncSession = Depends(get_db),
@@ -257,7 +307,6 @@ async def create_run(
             detail=f"Free trial limit of {FREE_TRIAL_RUN_LIMIT} runs reached. Upgrade to Pro.",
         )
 
-    # Resolve scenarios YAML: prefer pinned dataset version, else inline YAML
     scenarios_yaml = body.scenarios_yaml
     dataset_version_id = body.dataset_version_id
 
@@ -339,6 +388,7 @@ async def create_run(
         rubric=body.rubric,
         app_endpoint_url=body.app_endpoint_url,
         dataset_version_id=dataset_version_id,
+        is_public=False,
     )
     db.add(run)
     for r in results:
@@ -346,7 +396,6 @@ async def create_run(
     await db.commit()
     await db.refresh(run)
 
-    # Threshold alert
     threshold_env = os.environ.get("SCORE_FAIL_UNDER")
     if threshold_env:
         try:
@@ -386,6 +435,7 @@ async def create_run(
         mean_score=mean_score,
         results=results_out,
         dataset_version_id=dataset_version_id,
+        is_public=False,
     )
 
 
@@ -393,7 +443,7 @@ async def create_run(
 # Run queries
 # ---------------------------------------------------------------------------
 
-@app.get("/runs", response_model=list[RunSummaryOut])
+@app.get("/api/runs", response_model=list[RunSummaryOut])
 async def list_runs(
     project: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -420,12 +470,13 @@ async def list_runs(
             created_at=row.Run.created_at,
             mean_score=round(row.mean_score, 4),
             dataset_version_id=row.Run.dataset_version_id,
+            is_public=row.Run.is_public,
         )
         for row in rows
     ]
 
 
-@app.get("/runs/{run_id}", response_model=RunOut)
+@app.get("/api/runs/{run_id}", response_model=RunOut)
 async def get_run(
     run_id: str,
     db: AsyncSession = Depends(get_db),
@@ -465,6 +516,83 @@ async def get_run(
         mean_score=mean_score,
         results=results_out,
         dataset_version_id=run.dataset_version_id,
+        is_public=run.is_public,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Share routes
+# ---------------------------------------------------------------------------
+
+@app.get("/api/runs/{run_id}/share", response_model=ShareRunOut)
+async def get_shared_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Public endpoint — no auth required.
+    Returns the run only if is_public=True.
+    """
+    result = await db.execute(
+        select(Run)
+        .options(selectinload(Run.results))
+        .where(Run.id == run_id, Run.is_public == True)  # noqa: E712
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found or not shared")
+
+    avg_score = (
+        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
+    )
+    return ShareRunOut(
+        run_id=run.id,
+        project=run.project,
+        variant_name=run.variant_name,
+        model_name=run.model_name,
+        created_at=run.created_at,
+        avg_score=round(avg_score, 4),
+        results=[_build_share_result(r) for r in run.results],
+    )
+
+
+@app.patch("/api/runs/{run_id}/share", response_model=RunSummaryOut)
+async def toggle_run_share(
+    run_id: str,
+    body: ShareToggleRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Toggle public sharing for a run. Auth required — only the owner can share.
+    PATCH /api/runs/{run_id}/share  { "is_public": true }
+    """
+    result = await db.execute(
+        select(Run)
+        .options(selectinload(Run.results))
+        .where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    run.is_public = body.is_public
+    await db.commit()
+    await db.refresh(run)
+
+    mean_score = (
+        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
+    )
+    return RunSummaryOut(
+        id=run.id,
+        project=run.project,
+        variant_name=run.variant_name,
+        model_name=run.model_name,
+        run_label=run.run_label,
+        created_at=run.created_at,
+        mean_score=round(mean_score, 4),
+        dataset_version_id=run.dataset_version_id,
+        is_public=run.is_public,
     )
 
 

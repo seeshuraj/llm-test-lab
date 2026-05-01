@@ -91,6 +91,8 @@ class Run(Base):
     dataset_version_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("scenario_datasets.id"), nullable=True
     )
+    # Public share flag — when True, GET /api/runs/{id}/share is accessible without auth
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
 
     user: Mapped["User"] = relationship("User", back_populates="runs")
     results: Mapped[list["RunScenarioResult"]] = relationship(
