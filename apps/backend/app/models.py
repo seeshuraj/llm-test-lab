@@ -28,9 +28,9 @@ class ApiKey(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
-    name: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "CI / GitHub Actions"
-    key_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # bcrypt hash of raw key
-    key_prefix: Mapped[str] = mapped_column(String, nullable=False)  # first 8 chars shown in UI
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    key_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    key_prefix: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -38,6 +38,38 @@ class ApiKey(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     user: Mapped["User"] = relationship("User", back_populates="api_keys")
+
+
+class ScenarioDataset(Base):
+    """
+    A versioned snapshot of a scenarios YAML dataset.
+
+    Each time the YAML content changes for a (project, name) pair, a new
+    ScenarioDataset row is created and its parent_version_id points to the
+    previous version, forming a linked-list version chain.
+
+    version_hash: SHA-256 of yaml_content (hex). Two rows with the same hash
+    have identical content — saves are idempotent on unchanged YAML.
+    """
+    __tablename__ = "scenario_datasets"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    project: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)          # e.g. "rag-v1"
+    version_hash: Mapped[str] = mapped_column(String, nullable=False)  # SHA-256 hex
+    yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    # NULL means this is the first version of this (project, name) dataset
+    parent_version_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("scenario_datasets.id"), nullable=True
+    )
+
+    parent: Mapped[Optional["ScenarioDataset"]] = relationship(
+        "ScenarioDataset", remote_side="ScenarioDataset.id", foreign_keys=[parent_version_id]
+    )
+    runs: Mapped[list["Run"]] = relationship("Run", back_populates="dataset_version")
 
 
 class Run(Base):
@@ -55,10 +87,17 @@ class Run(Base):
     scenarios_yaml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rubric: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     app_endpoint_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # FK to the dataset version used for this run (nullable for legacy runs)
+    dataset_version_id: Mapped[Optional[str]] = mapped_column(
+        String, ForeignKey("scenario_datasets.id"), nullable=True
+    )
 
     user: Mapped["User"] = relationship("User", back_populates="runs")
     results: Mapped[list["RunScenarioResult"]] = relationship(
         "RunScenarioResult", back_populates="run", cascade="all, delete-orphan"
+    )
+    dataset_version: Mapped[Optional["ScenarioDataset"]] = relationship(
+        "ScenarioDataset", back_populates="runs"
     )
 
 

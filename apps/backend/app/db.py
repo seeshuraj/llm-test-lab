@@ -65,12 +65,9 @@ async def _migrate_add_tables():
     """
     Belt-and-suspenders: explicitly CREATE TABLE IF NOT EXISTS for any table
     that was added after the initial DB deployment.
-
-    SQLAlchemy's create_all is idempotent for *existing* tables but it WON'T
-    add a table that was defined in models.py *after* the DB was first
-    initialised. This guard ensures those tables always exist.
     """
     async with engine.begin() as conn:
+        # --- api_keys ---
         if is_postgres:
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -99,6 +96,37 @@ async def _migrate_add_tables():
             """))
         logger.info("[db] api_keys table ensured")
 
+        # --- scenario_datasets (Epic 4: dataset versioning) ---
+        if is_postgres:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS scenario_datasets (
+                    id                 VARCHAR PRIMARY KEY,
+                    project            VARCHAR NOT NULL,
+                    name               VARCHAR NOT NULL,
+                    version_hash       VARCHAR NOT NULL,
+                    yaml_content       TEXT NOT NULL,
+                    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    parent_version_id  VARCHAR REFERENCES scenario_datasets(id)
+                )
+            """))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_scenario_datasets_project "
+                "ON scenario_datasets(project)"
+            ))
+        else:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS scenario_datasets (
+                    id                TEXT PRIMARY KEY,
+                    project           TEXT NOT NULL,
+                    name              TEXT NOT NULL,
+                    version_hash      TEXT NOT NULL,
+                    yaml_content      TEXT NOT NULL,
+                    created_at        DATETIME NOT NULL,
+                    parent_version_id TEXT REFERENCES scenario_datasets(id)
+                )
+            """))
+        logger.info("[db] scenario_datasets table ensured")
+
 
 async def _migrate_add_columns():
     """Safely add new columns to existing tables without dropping data."""
@@ -109,10 +137,9 @@ async def _migrate_add_columns():
         ("runs", "app_endpoint_url", "TEXT"),
         ("runs", "run_label", "VARCHAR"),
         ("run_scenario_results", "rag_scores", json_type),
-        # Guard: add key_prefix to api_keys for DBs created before this column
-        # existed. The CREATE TABLE IF NOT EXISTS above already includes it,
-        # but databases initialised before this migration need it added.
         ("api_keys", "key_prefix", "VARCHAR" if is_postgres else "TEXT"),
+        # Epic 4: link each run to its dataset version
+        ("runs", "dataset_version_id", "VARCHAR" if is_postgres else "TEXT"),
     ]
     async with engine.begin() as conn:
         for table, column, col_type in new_columns:
@@ -147,15 +174,11 @@ async def init_db():
                               tables added after initial deployment
     3. _migrate_add_columns — ADD COLUMN IF NOT EXISTS for new columns
     """
-    # Step 1: create all ORM-defined tables (idempotent)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("[db] create_all complete")
 
-    # Step 2: explicit table guards (catches tables added post-deployment)
     await _migrate_add_tables()
-
-    # Step 3: column migrations
     await _migrate_add_columns()
 
     logger.info("[db] Schema ready")
