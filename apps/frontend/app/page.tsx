@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, updateRunLabel, Run } from "@/lib/api";
+import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, updateRunLabel, Run, ModelDetail } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
 import {
   listSavedScenarios, saveScenario, deleteScenario, SavedScenario,
@@ -43,6 +43,27 @@ function resolveStatColor(color: string): string {
   return color.startsWith("#") ? color : "#ffffff";
 }
 
+// ─── Provider badge ──────────────────────────────────────────────────────────
+
+const PROVIDER_META: Record<string, { label: string; color: string }> = {
+  groq:    { label: "Groq",   color: "#f55036" },
+  openai:  { label: "OpenAI", color: "#10a37f" },
+  ollama:  { label: "Ollama", color: "#7c3aed" },
+  unknown: { label: "?",      color: "#6b7280" },
+};
+
+function ProviderBadge({ provider }: { provider: string }) {
+  const meta = PROVIDER_META[provider] ?? PROVIDER_META.unknown;
+  return (
+    <span
+      className="inline-block text-white text-xs font-semibold px-1.5 py-0.5 rounded"
+      style={{ backgroundColor: meta.color, fontSize: "0.65rem", lineHeight: 1.4 }}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 export default function HomePage() {
   const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -61,7 +82,9 @@ export default function HomePage() {
   const [variant, setVariant] = useState("v1");
   const [runLabel, setRunLabel] = useState("");
   const [modelName, setModelName] = useState("llama-3.1-8b-instant");
-  const [availableModels, setAvailableModels] = useState<string[]>(["llama-3.1-8b-instant"]);
+  const [availableModels, setAvailableModels] = useState<ModelDetail[]>([
+    { id: "llama-3.1-8b-instant", provider: "groq" },
+  ]);
   const [scenariosYaml, setScenariosYaml] = useState("");
   const [fileName, setFileName] = useState("");
   const [yamlMode, setYamlMode] = useState<"file" | "editor">("editor");
@@ -239,6 +262,9 @@ export default function HomePage() {
       avg: r.avg_score,
     }));
 
+  // Currently selected model detail (for badge in form header)
+  const selectedModel = availableModels.find((m) => m.id === modelName);
+
   return (
     <main className="max-w-6xl mx-auto p-8">
       <div className="flex items-center justify-between mb-8">
@@ -314,248 +340,218 @@ export default function HomePage() {
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Project name</label>
                   <input type="text" value={project} onChange={(e) => setProject(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">Variant name</label>
+                  <label className="block text-sm text-gray-400 mb-1">Variant</label>
                   <input type="text" value={variant} onChange={(e) => setVariant(e.target.value)}
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" required />
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
                 </div>
               </div>
+
+              {/* ── Model picker with provider badges ── */}
               <div>
-                <label className="block text-sm text-gray-400 mb-1">Model</label>
-                <select value={modelName} onChange={(e) => setModelName(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                  {availableModels.map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm text-gray-400">Scenarios YAML</label>
-                  <div className="flex items-center gap-2">
-                    {savedScenarios.length > 0 && (
-                      <select
-                        onChange={(e) => { if (e.target.value) handleLoadFromLibrary(e.target.value); e.target.value = ""; }}
-                        className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-300 text-xs focus:outline-none focus:border-blue-500"
-                        defaultValue=""
-                      >
-                        <option value="" disabled>📚 Load saved…</option>
-                        {savedScenarios.map((s) => (
-                          <option key={s.name} value={s.yaml}>{s.name}</option>
-                        ))}
-                      </select>
-                    )}
-                    <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 text-xs">
-                      <button type="button" onClick={() => setYamlMode("editor")}
-                        className={`px-3 py-1 rounded-md transition-colors ${yamlMode === "editor" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
-                        ✏️ Editor
-                      </button>
-                      <button type="button" onClick={() => setYamlMode("file")}
-                        className={`px-3 py-1 rounded-md transition-colors ${yamlMode === "file" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
-                        📂 File
-                      </button>
-                    </div>
-                  </div>
+                <label className="block text-sm text-gray-400 mb-1">Judge model</label>
+                <div className="relative">
+                  <select
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 appearance-none pr-8"
+                  >
+                    {availableModels.map((m) => (
+                      <option key={m.id} value={m.id}>{m.id}</option>
+                    ))}
+                  </select>
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">▾</div>
                 </div>
-                {yamlMode === "editor" ? (
-                  <div className="relative">
-                    <textarea value={scenariosYaml} onChange={(e) => setScenariosYaml(e.target.value)}
-                      rows={10} spellCheck={false} placeholder={SAMPLE_YAML}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
-                    <button type="button" onClick={() => setScenariosYaml(SAMPLE_YAML)}
-                      className="absolute top-2 right-2 text-xs text-gray-500 hover:text-gray-300 bg-gray-900 border border-gray-700 rounded px-2 py-0.5">Load sample</button>
-                  </div>
-                ) : (
-                  <label className="flex items-center gap-3 cursor-pointer w-full bg-gray-800 border border-gray-700 hover:border-blue-500 rounded-lg px-3 py-2 text-sm transition-colors">
-                    <span className="text-blue-400">📂 Choose file</span>
-                    <span className="text-gray-400 truncate">{fileName || "No file chosen"}</span>
-                    <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
-                  </label>
-                )}
-                {scenariosYaml.trim() && (
-                  <div className="mt-2">
-                    {!showSaveLib ? (
-                      <button type="button" onClick={() => setShowSaveLib(true)}
-                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors">+ Save to library</button>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
-                          placeholder="Scenario set name…"
-                          className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-blue-500" />
-                        <button type="button" onClick={handleSaveToLibrary}
-                          className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition-colors">Save</button>
-                        <button type="button" onClick={() => setShowSaveLib(false)}
-                          className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
-                      </div>
-                    )}
-                    {savedScenarios.length > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {savedScenarios.map((s) => (
-                          <div key={s.name} className="flex items-center justify-between text-xs text-gray-500">
-                            <span>💾 {s.name}</span>
-                            <button type="button" onClick={() => handleDeleteFromLibrary(s.name)}
-                              className="text-red-500 hover:text-red-400">× remove</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                {selectedModel && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <ProviderBadge provider={selectedModel.provider} />
+                    <span className="text-xs text-gray-500">
+                      {selectedModel.provider === "groq" && "Fast inference via Groq Cloud"}
+                      {selectedModel.provider === "openai" && "OpenAI API — billed per token"}
+                      {selectedModel.provider === "ollama" && "Local model via Ollama"}
+                      {selectedModel.provider === "unknown" && "Unknown provider"}
+                    </span>
                   </div>
                 )}
               </div>
+
               <div>
                 <label className="block text-sm text-gray-400 mb-1">App endpoint URL <span className="text-gray-600">(optional)</span></label>
                 <input type="text" value={appUrl} onChange={(e) => setAppUrl(e.target.value)}
-                  placeholder="https://your-app.com/answer"
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 font-mono" />
-                <p className="text-xs text-gray-500 mt-1">POST {`{ question, context }`} → expects {`{ answer }`}. Leave blank for echo mode.</p>
+                  placeholder="https://your-app.com/api/query"
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
               </div>
+
               <div>
-                <button type="button" onClick={() => setShowRubric(!showRubric)}
-                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">
-                  <span className={`transition-transform ${showRubric ? "rotate-90" : ""}`}>▶</span>
-                  Custom rubric <span className="text-gray-600">(optional)</span>
-                </button>
-                {showRubric && (
-                  <div className="mt-2">
-                    <textarea value={rubric} onChange={(e) => setRubric(e.target.value)}
-                      rows={5} placeholder={DEFAULT_RUBRIC_TEXT}
-                      className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500 resize-y" />
-                    <p className="text-xs text-gray-500 mt-1">Leave blank to use the default rubric.</p>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm text-gray-400">Scenarios YAML</label>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setYamlMode("editor")}
+                      className={`text-xs px-2 py-0.5 rounded ${yamlMode === "editor" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-400"}`}>Editor</button>
+                    <button type="button" onClick={() => setYamlMode("file")}
+                      className={`text-xs px-2 py-0.5 rounded ${yamlMode === "file" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-400"}`}>Upload file</button>
+                  </div>
+                </div>
+                {yamlMode === "editor" ? (
+                  <textarea value={scenariosYaml} onChange={(e) => setScenariosYaml(e.target.value)}
+                    rows={10} className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500" />
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <label className="cursor-pointer bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">
+                      Choose file
+                      <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
+                    </label>
+                    {fileName && <span className="text-xs text-gray-400">{fileName}</span>}
                   </div>
                 )}
               </div>
-              {formError && <p className="text-red-400 text-sm">{formError}</p>}
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={submitting}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed text-white py-2 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2">
-                  {submitting && (
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>
-                  )}
-                  {submitting ? "Running eval..." : "Run Evaluation"}
+
+              {/* Scenario library */}
+              {savedScenarios.length > 0 && (
+                <div>
+                  <label className="block text-sm text-gray-400 mb-1">Load from library</label>
+                  <div className="flex flex-wrap gap-2">
+                    {savedScenarios.map((s) => (
+                      <div key={s.name} className="flex items-center gap-1">
+                        <button type="button" onClick={() => handleLoadFromLibrary(s.yaml)}
+                          className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-2 py-1 rounded">{s.name}</button>
+                        <button type="button" onClick={() => handleDeleteFromLibrary(s.name)}
+                          className="text-gray-500 hover:text-red-400 text-xs px-1">✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Save to library */}
+              <div className="flex items-center gap-2">
+                {showSaveLib ? (
+                  <>
+                    <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
+                      placeholder="Scenario set name" className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500" />
+                    <button type="button" onClick={handleSaveToLibrary} className="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg">Save</button>
+                    <button type="button" onClick={() => setShowSaveLib(false)} className="text-gray-500 text-xs">Cancel</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => setShowSaveLib(true)}
+                    className="text-gray-400 hover:text-white text-xs underline">+ Save current scenarios to library</button>
+                )}
+              </div>
+
+              {/* Custom rubric */}
+              <div>
+                <button type="button" onClick={() => { setShowRubric(!showRubric); if (!rubric) setRubric(DEFAULT_RUBRIC_TEXT); }}
+                  className="text-sm text-blue-400 hover:text-blue-300">
+                  {showRubric ? "▼" : "▶"} Custom rubric <span className="text-gray-500">(optional)</span>
                 </button>
-                <button type="button" onClick={() => { setShowForm(false); setFormError(null); setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel(""); }}
-                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg text-sm font-medium transition-colors">Cancel</button>
+                {showRubric && (
+                  <textarea value={rubric} onChange={(e) => setRubric(e.target.value)}
+                    rows={5} className="mt-2 w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-xs font-mono focus:outline-none focus:border-blue-500" />
+                )}
+              </div>
+
+              {formError && <p className="text-red-400 text-sm">{formError}</p>}
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setShowForm(false)}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">Cancel</button>
+                <button type="submit" disabled={submitting}
+                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-6 py-2 rounded-lg text-sm font-medium">
+                  {submitting ? "Running…" : "Run evaluation"}
+                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {loading ? (
+      {loading && (
         <div className="space-y-3">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-12 bg-gray-800 rounded-lg animate-pulse" />
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-16 bg-gray-800 rounded-xl animate-pulse" />
           ))}
         </div>
-      ) : error ? (
-        <p className="text-red-400">Failed to connect: {error}</p>
-      ) : runs.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-gray-500 text-lg mb-2">No runs yet.</p>
-          <p className="text-gray-600 text-sm">Click &quot;+ New Run&quot; to run your first evaluation.</p>
+      )}
+
+      {error && <p className="text-red-400 mb-4">{error}</p>}
+
+      {!loading && runs.length === 0 && (
+        <div className="text-center py-24 text-gray-500">
+          <p className="text-4xl mb-4">🧪</p>
+          <p className="text-lg font-semibold text-gray-300">No runs yet</p>
+          <p className="text-sm mt-1">Click <span className="text-blue-400">+ New Run</span> to kick off your first evaluation.</p>
         </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border border-gray-700">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-800 text-gray-300">
-              <tr>
-                <th className="px-4 py-3">Label / ID</th>
-                <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3">Variant</th>
-                <th className="px-4 py-3">Model</th>
-                <th className="px-4 py-3">Scenarios</th>
-                <th className="px-4 py-3">Avg Score</th>
-                <th className="px-4 py-3">Pass Rate</th>
-                <th className="px-4 py-3">Created</th>
-                <th className="px-4 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((run, i) => {
-                const scores = run.results.map((r) => r.score);
-                const avg = run.avg_score;
-                const pass = scores.length ? (scores.filter((s) => s >= 0.8).length / scores.length) * 100 : 0;
-                const isEditing = editingLabel === run.run_id;
-                return (
-                  <tr key={run.run_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-800"}>
-                    <td className="px-4 py-3">
-                      {isEditing ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            autoFocus
-                            type="text"
-                            value={editLabelValue}
-                            onChange={(e) => setEditLabelValue(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleSaveLabel(run.run_id);
-                              if (e.key === "Escape") setEditingLabel(null);
-                            }}
-                            className="bg-gray-800 border border-blue-500 rounded px-2 py-0.5 text-white text-xs w-36 focus:outline-none"
-                          />
-                          <button onClick={() => handleSaveLabel(run.run_id)} disabled={savingLabel === run.run_id}
-                            className="text-green-400 hover:text-green-300 text-xs disabled:opacity-50">
-                            {savingLabel === run.run_id ? "…" : "✓"}
-                          </button>
-                          <button onClick={() => setEditingLabel(null)} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1 group">
-                          {run.run_label
-                            ? <span className="text-white font-medium text-sm">{run.run_label}</span>
-                            : <span className="font-mono text-xs text-gray-400">{run.run_id.slice(0, 8)}…</span>
-                          }
-                          <button
-                            onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
-                            className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-300 text-xs transition-opacity ml-1"
-                            title="Rename"
-                          >✏️</button>
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-white">{run.project}</td>
-                    <td className="px-4 py-3 text-gray-300">{run.variant_name}</td>
-                    <td className="px-4 py-3 text-gray-400 text-xs font-mono">{run.model_name}</td>
-                    <td className="px-4 py-3 text-gray-300">{run.results.length}</td>
-                    <td className="px-4 py-3">
+      )}
+
+      {!loading && runs.length > 0 && (
+        <div className="space-y-3">
+          {runs.map((run) => {
+            const avg = run.avg_score;
+            const isEditing = editingLabel === run.run_id;
+            return (
+              <div key={run.run_id} className="bg-gray-900 border border-gray-700 rounded-xl px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    {isEditing ? (
                       <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full rounded-full" style={{ width: `${avg * 100}%`, backgroundColor: scoreColor(avg) }} />
-                        </div>
-                        <span className="font-bold text-xs" style={{ color: scoreColor(avg) }}>{avg.toFixed(2)}</span>
+                        <input autoFocus type="text" value={editLabelValue}
+                          onChange={(e) => setEditLabelValue(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleSaveLabel(run.run_id); if (e.key === "Escape") setEditingLabel(null); }}
+                          className="bg-gray-800 border border-blue-500 rounded px-2 py-0.5 text-white text-sm w-48 focus:outline-none" />
+                        <button onClick={() => handleSaveLabel(run.run_id)} disabled={!!savingLabel}
+                          className="text-xs text-green-400 hover:text-green-300">{savingLabel === run.run_id ? "Saving…" : "Save"}</button>
+                        <button onClick={() => setEditingLabel(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
                       </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        pass >= 80 ? "bg-green-900 text-green-300" : pass >= 50 ? "bg-yellow-900 text-yellow-300" : "bg-red-900 text-red-300"
-                      }`}>{pass.toFixed(0)}%</span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{run.created_at ? new Date(run.created_at).toLocaleString() : "—"}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Link href={`/runs/${run.run_id}`} className="text-blue-400 hover:underline text-xs">View →</Link>
-                        <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
-                          title="Re-run" className="text-xs text-green-400 hover:text-green-300 disabled:opacity-40 transition-colors">
-                          {rerunning === run.run_id ? "⏳" : "🔁"}
-                        </button>
-                        <button onClick={() => exportRunCSV(run)} title="Export CSV"
-                          className="text-xs text-gray-400 hover:text-white transition-colors">⬇️</button>
-                        <button onClick={() => handleCopyShareLink(run.run_id)} title="Copy shareable link"
-                          className="text-xs text-gray-400 hover:text-white transition-colors">
-                          {copied === run.run_id ? "✅" : "🔗"}
-                        </button>
-                        <button onClick={() => handleDelete(run.run_id)} className="text-red-500 hover:text-red-400 text-xs transition-colors">🗑</button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-white truncate">
+                          {run.run_label || <span className="font-mono text-blue-300 text-sm">{run.run_id.slice(0, 8)}…</span>}
+                        </span>
+                        <button onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
+                          className="text-gray-600 hover:text-gray-300 text-xs">✏</button>
+                      </>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {run.project} · {run.variant_name} ·
+                    <span className="ml-1 mr-1">{run.model_name}</span>
+                    {(() => {
+                      const m = availableModels.find((x) => x.id === run.model_name);
+                      return m ? <ProviderBadge provider={m.provider} /> : null;
+                    })()}
+                    {run.created_at && <> · {new Date(run.created_at).toLocaleString()}</>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Avg score</p>
+                    <p className="text-xl font-bold" style={{ color: scoreColor(avg) }}>{avg.toFixed(2)}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">Scenarios</p>
+                    <p className="text-xl font-bold text-white">{run.results.length}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Link href={`/runs/${run.run_id}`}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">View</Link>
+                  <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
+                    className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                    {rerunning === run.run_id ? "…" : "Re-run"}
+                  </button>
+                  <button onClick={() => handleCopyShareLink(run.run_id)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+                    {copied === run.run_id ? "✓ Copied" : "Share"}
+                  </button>
+                  <button onClick={() => exportRunCSV(run)}
+                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">CSV</button>
+                  <button onClick={() => handleDelete(run.run_id)}
+                    className="text-gray-600 hover:text-red-400 text-xs px-2 py-1.5 transition-colors">✕</button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </main>

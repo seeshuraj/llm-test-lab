@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { use } from "react";
-import { fetchRun, exportRunCSV, Run } from "@/lib/api";
+import { fetchRun, exportRunCSV, Run, ScenarioResult } from "@/lib/api";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -25,9 +25,52 @@ const CustomBarTooltip = ({ active, payload }: any) => {
   );
 };
 
-// Skeleton placeholder card
 function SkeletonCard() {
   return <div className="h-24 bg-gray-800 rounded-xl animate-pulse" />;
+}
+
+// ─── RAG metric mini-bar ─────────────────────────────────────────────────────
+
+function RagMetricBar({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="text-gray-500 text-xs w-28 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.min(value, 1) * 100}%`, backgroundColor: color }}
+        />
+      </div>
+      <span className="text-xs font-semibold w-8 text-right" style={{ color }}>
+        {value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function RagMetricsCell({ result }: { result: ScenarioResult }) {
+  const hasRag =
+    result.faithfulness !== undefined ||
+    result.context_precision !== undefined ||
+    result.answer_relevance !== undefined;
+
+  if (!hasRag) {
+    return <span className="text-gray-600 text-xs">—</span>;
+  }
+
+  return (
+    <div className="space-y-1 py-1">
+      {result.faithfulness !== undefined && (
+        <RagMetricBar label="Faithfulness" value={result.faithfulness} color={scoreColor(result.faithfulness)} />
+      )}
+      {result.context_precision !== undefined && (
+        <RagMetricBar label="Ctx Precision" value={result.context_precision} color={scoreColor(result.context_precision)} />
+      )}
+      {result.answer_relevance !== undefined && (
+        <RagMetricBar label="Ans Relevance" value={result.answer_relevance} color={scoreColor(result.answer_relevance)} />
+      )}
+    </div>
+  );
 }
 
 export default function RunPage({ params }: { params: Promise<{ id: string }> }) {
@@ -46,7 +89,6 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     </main>
   );
 
-  // Skeleton loading state
   if (!run) return (
     <main className="max-w-6xl mx-auto p-8">
       <div className="h-4 w-24 bg-gray-700 rounded animate-pulse mb-6" />
@@ -104,6 +146,21 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   });
   const distData = Object.entries(buckets).map(([range, count]) => ({ range, count }));
 
+  // ── RAG aggregate stats (only shown if any result has RAG metrics)
+  const ragResults = run.results.filter(
+    (r) => r.faithfulness !== undefined || r.context_precision !== undefined || r.answer_relevance !== undefined
+  );
+  const hasRagMetrics = ragResults.length > 0;
+  const avgFaithfulness = ragResults.filter(r => r.faithfulness !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.faithfulness ?? 0), 0) / ragResults.filter(r => r.faithfulness !== undefined).length
+    : null;
+  const avgCtxPrecision = ragResults.filter(r => r.context_precision !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.context_precision ?? 0), 0) / ragResults.filter(r => r.context_precision !== undefined).length
+    : null;
+  const avgAnsRelevance = ragResults.filter(r => r.answer_relevance !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.answer_relevance ?? 0), 0) / ragResults.filter(r => r.answer_relevance !== undefined).length
+    : null;
+
   const displayName = run.run_label || `${run.run_id.slice(0, 8)}…`;
 
   return (
@@ -148,6 +205,42 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
           </div>
         ))}
       </div>
+
+      {/* ── RAG aggregate card (only when RAG metrics are present) ── */}
+      {hasRagMetrics && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-8">
+          <h2 className="text-sm font-semibold text-gray-300 mb-4">RAG Metric Averages</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {avgFaithfulness !== null && (
+              <div className="text-center">
+                <p className="text-xs text-gray-500 mb-1">Faithfulness</p>
+                <p className="text-2xl font-bold" style={{ color: scoreColor(avgFaithfulness) }}>{avgFaithfulness.toFixed(2)}</p>
+                <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${avgFaithfulness * 100}%`, backgroundColor: scoreColor(avgFaithfulness) }} />
+                </div>
+              </div>
+            )}
+            {avgCtxPrecision !== null && (
+              <div className="text-center">
+                <p className="text-xs text-gray-500 mb-1">Context Precision</p>
+                <p className="text-2xl font-bold" style={{ color: scoreColor(avgCtxPrecision) }}>{avgCtxPrecision.toFixed(2)}</p>
+                <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${avgCtxPrecision * 100}%`, backgroundColor: scoreColor(avgCtxPrecision) }} />
+                </div>
+              </div>
+            )}
+            {avgAnsRelevance !== null && (
+              <div className="text-center">
+                <p className="text-xs text-gray-500 mb-1">Answer Relevance</p>
+                <p className="text-2xl font-bold" style={{ color: scoreColor(avgAnsRelevance) }}>{avgAnsRelevance.toFixed(2)}</p>
+                <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${avgAnsRelevance * 100}%`, backgroundColor: scoreColor(avgAnsRelevance) }} />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -219,7 +312,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
         </ResponsiveContainer>
       </div>
 
-      {/* Results table */}
+      {/* Results table — now includes RAG metric column */}
       <h2 className="text-sm font-semibold text-gray-300 mb-3">Scenario Details</h2>
       <div className="overflow-x-auto rounded-xl border border-gray-700">
         <table className="w-full text-sm text-left">
@@ -229,6 +322,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
               <th className="px-4 py-3">Score</th>
               <th className="px-4 py-3">Latency</th>
               <th className="px-4 py-3">Judge</th>
+              {hasRagMetrics && <th className="px-4 py-3">RAG Metrics</th>}
               <th className="px-4 py-3">Reason</th>
             </tr>
           </thead>
@@ -246,6 +340,11 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
                 </td>
                 <td className="px-4 py-3 text-blue-300 text-xs">{r.latency_ms.toFixed(0)} ms</td>
                 <td className="px-4 py-3 text-gray-400 font-mono text-xs">{r.judge_model}</td>
+                {hasRagMetrics && (
+                  <td className="px-4 py-3 min-w-[200px]">
+                    <RagMetricsCell result={r} />
+                  </td>
+                )}
                 <td className="px-4 py-3 text-gray-300 text-xs leading-relaxed max-w-sm">{r.reason}</td>
               </tr>
             ))}
