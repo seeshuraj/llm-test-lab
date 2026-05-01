@@ -50,6 +50,17 @@ export async function fetchRun(id: string): Promise<Run> {
   return res.json();
 }
 
+/**
+ * Fetch a publicly shared run — no auth required.
+ * Used by /share/[runId] which is a public report page.
+ */
+export async function fetchSharedRun(runId: string): Promise<Run> {
+  const res = await fetch(`${API_BASE}/api/runs/${runId}/share`);
+  if (res.status === 404) throw new Error("Run not found or not shared");
+  if (!res.ok) throw new Error(`Failed to fetch shared run: ${res.status}`);
+  return res.json();
+}
+
 export async function deleteRun(runId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/runs/${runId}`, {
     method: "DELETE",
