@@ -50,6 +50,8 @@ jobs:
           # Provide stub keys so judge_factory doesn't raise on import
           GROQ_API_KEY: "test-stub"
           ANTHROPIC_API_KEY: "test-stub"
+          STRIPE_SECRET_KEY: "sk_test_stub"
+          STRIPE_WEBHOOK_SECRET: "whsec_stub"
           DATABASE_URL: "sqlite+aiosqlite:///./test.db"
           SECRET_KEY: "ci-test-secret-key-not-for-production"
         run: |
