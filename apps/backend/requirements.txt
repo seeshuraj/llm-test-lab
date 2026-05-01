@@ -9,7 +9,8 @@ passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
 slowapi==0.1.9
 groq==0.9.0
-anthropicsdk
+anthropic>=0.26.0
+stripe>=9.0.0
 requests==2.32.3
 # Core evaluation package (editable install via Dockerfile)
 # llm-test-lab-core installed via: pip install -e ../../packages/core-python
