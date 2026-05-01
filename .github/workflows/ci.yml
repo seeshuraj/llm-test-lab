@@ -1,0 +1,56 @@
+name: CI — pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install core package
+        run: |
+          pip install -e packages/core-python
+
+      - name: Install SDK package
+        run: |
+          pip install -e packages/sdk-python
+
+      - name: Install backend dependencies
+        run: |
+          pip install -r apps/backend/requirements.txt || true
+          pip install -e apps/backend || true
+
+      - name: Install test dependencies
+        run: |
+          pip install pytest pytest-asyncio pytest-mock httpx
+
+      - name: Run tests
+        env:
+          # Provide stub keys so judge_factory doesn't raise on import
+          GROQ_API_KEY: "test-stub"
+          ANTHROPIC_API_KEY: "test-stub"
+          DATABASE_URL: "sqlite+aiosqlite:///./test.db"
+          SECRET_KEY: "ci-test-secret-key-not-for-production"
+        run: |
+          pytest

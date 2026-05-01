@@ -88,7 +88,7 @@ DEFAULT_RUBRIC = (
     "Rules: "
     "(1) If the context contains relevant information, the answer must use it accurately — score high for correct grounding, low for contradictions or hallucinations. "
     "(2) If the context does NOT contain relevant information for the question, a correct refusal such as "
-    "'I don\'t know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
+    "'I don't know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
     "(3) If the context is irrelevant but the model answers correctly from general knowledge, score 0.3-0.5 — the answer may be factually right but it is not grounded. "
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
@@ -157,6 +157,22 @@ async def on_startup():
 # Schemas
 # ---------------------------------------------------------------------------
 
+class ModelDetailOut(BaseModel):
+    """Rich model metadata returned by /api/models."""
+    id: str
+    provider: str
+    tier: str
+    label: str
+
+
+class ModelsResponse(BaseModel):
+    """Response schema for GET /api/models."""
+    # Legacy flat list — kept so existing frontend code that reads .models still works
+    models: List[str]
+    # Typed rich list for model picker UI (provider badges, tier labels)
+    models_detail: List[ModelDetailOut]
+
+
 class RunLocalRequest(BaseModel):
     project: str
     variant_name: str = "v1"
@@ -189,7 +205,7 @@ class ScenarioResultOut(BaseModel):
     judge_model: str
     # Legacy flat dict (kept for backwards compat with existing dashboard)
     rag_scores: Optional[dict] = None
-    # New structured per-metric breakdown
+    # Structured per-metric breakdown
     faithfulness: Optional[MetricScoreOut] = None
     answer_relevancy: Optional[MetricScoreOut] = None
     context_recall: Optional[MetricScoreOut] = None
@@ -235,6 +251,8 @@ def _metric_score_out(rag_scores_dict: Optional[dict], key: str) -> Optional[Met
 
 async def _build_run_out(run: Run, results: list) -> RunOut:
     avg = sum(r.score for r in results) / len(results) if results else 0.0
+    # Infer enable_rag_metrics from whether any result has rag_scores populated
+    has_rag = any(r.rag_scores for r in results)
     return RunOut(
         run_id=run.id,
         project=run.project,
@@ -246,6 +264,7 @@ async def _build_run_out(run: Run, results: list) -> RunOut:
         scenarios_yaml=run.scenarios_yaml,
         rubric=run.rubric,
         app_endpoint_url=run.app_endpoint_url,
+        enable_rag_metrics=has_rag,
         results=[
             ScenarioResultOut(
                 scenario_id=r.scenario_id,
@@ -283,17 +302,22 @@ async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> 
 # Routes
 # ---------------------------------------------------------------------------
 
-@app.get("/api/models")
+@app.get("/api/models", response_model=ModelsResponse)
 def list_models():
     """Return supported judge models with provider + tier metadata."""
-    return {
-        # Legacy flat list (kept for backwards compat)
-        "models": _PUBLIC_MODEL_IDS,
-        # New rich list consumed by the dashboard model picker
-        "models_detail": [
-            m for m in _CORE_MODELS if m["provider"] != "ollama"
+    public_models = [m for m in _CORE_MODELS if m["provider"] != "ollama"]
+    return ModelsResponse(
+        models=_PUBLIC_MODEL_IDS,
+        models_detail=[
+            ModelDetailOut(
+                id=m["id"],
+                provider=m["provider"],
+                tier=m["tier"],
+                label=m["label"],
+            )
+            for m in public_models
         ],
-    }
+    )
 
 
 @app.post("/api/run-local", response_model=RunOut)
