@@ -46,10 +46,11 @@ function resolveStatColor(color: string): string {
 // ─── Provider badge ──────────────────────────────────────────────────────────
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
-  groq:    { label: "Groq",   color: "#f55036" },
-  openai:  { label: "OpenAI", color: "#10a37f" },
-  ollama:  { label: "Ollama", color: "#7c3aed" },
-  unknown: { label: "?",      color: "#6b7280" },
+  groq:      { label: "Groq",      color: "#f55036" },
+  anthropic: { label: "Anthropic", color: "#c5693a" },
+  openai:    { label: "OpenAI",    color: "#10a37f" },
+  ollama:    { label: "Ollama",    color: "#7c3aed" },
+  unknown:   { label: "?",         color: "#6b7280" },
 };
 
 function ProviderBadge({ provider }: { provider: string }) {
@@ -85,6 +86,7 @@ export default function HomePage() {
   const [availableModels, setAvailableModels] = useState<ModelDetail[]>([
     { id: "llama-3.1-8b-instant", provider: "groq" },
   ]);
+  const [isPro, setIsPro] = useState(false);
   const [scenariosYaml, setScenariosYaml] = useState("");
   const [fileName, setFileName] = useState("");
   const [yamlMode, setYamlMode] = useState<"file" | "editor">("editor");
@@ -108,6 +110,11 @@ export default function HomePage() {
   useEffect(() => {
     setSavedScenarios(listSavedScenarios());
     fetchModels().then(setAvailableModels);
+    // Fetch plan status to gate Pro models
+    fetch(`${API_BASE}/auth/me`, { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((d) => setIsPro(!!d.is_pro))
+      .catch(() => {});
   }, []);
 
   const silentRefresh = useCallback(() => {
@@ -231,6 +238,10 @@ export default function HomePage() {
       });
       if (!res.ok) {
         const err = await res.json();
+        // Surface Pro upgrade hint on 403
+        if (res.status === 402 || res.status === 403) {
+          throw new Error(err.detail + " → Go to Settings to upgrade.");
+        }
         throw new Error(err.detail || "Run failed");
       }
       setShowForm(false);
@@ -262,8 +273,9 @@ export default function HomePage() {
       avg: r.avg_score,
     }));
 
-  // Currently selected model detail (for badge in form header)
   const selectedModel = availableModels.find((m) => m.id === modelName);
+  const ANTHROPIC_PROVIDERS = ["anthropic"];
+  const isProModel = (m: ModelDetail) => ANTHROPIC_PROVIDERS.includes(m.provider.toLowerCase());
 
   return (
     <main className="max-w-6xl mx-auto p-8">
@@ -283,8 +295,12 @@ export default function HomePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {isPro && (
+            <span className="bg-emerald-900/50 text-emerald-300 border border-emerald-700 text-xs font-bold px-2.5 py-1 rounded-full">PRO ✓</span>
+          )}
           <Link href="/trends" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">📈 Trends</Link>
           <Link href="/compare" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">⚖ Compare</Link>
+          <Link href="/settings" className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">⚙ Settings</Link>
           <button onClick={() => silentRefresh()} title="Refresh now" className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg text-sm transition-colors">{refreshing ? "⟳" : "↻"}</button>
           <button onClick={() => { setShowForm(true); setScenariosYaml(SAMPLE_YAML); }} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">+ New Run</button>
           <button onClick={() => { clearToken(); router.push("/login"); }} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Sign Out</button>
@@ -349,7 +365,7 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* ── Model picker with provider badges ── */}
+              {/* ── Model picker with Pro gating ── */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Judge model</label>
                 <div className="relative">
@@ -358,21 +374,34 @@ export default function HomePage() {
                     onChange={(e) => setModelName(e.target.value)}
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 appearance-none pr-8"
                   >
-                    {availableModels.map((m) => (
-                      <option key={m.id} value={m.id}>{m.id}</option>
-                    ))}
+                    {availableModels.map((m) => {
+                      const locked = isProModel(m) && !isPro;
+                      return (
+                        <option key={m.id} value={m.id} disabled={locked}>
+                          {locked ? `🔒 ${m.id} (Pro only)` : m.id}
+                        </option>
+                      );
+                    })}
                   </select>
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400 text-xs">▾</div>
                 </div>
                 {selectedModel && (
                   <div className="mt-1.5 flex items-center gap-2">
                     <ProviderBadge provider={selectedModel.provider} />
-                    <span className="text-xs text-gray-500">
-                      {selectedModel.provider === "groq" && "Fast inference via Groq Cloud"}
-                      {selectedModel.provider === "openai" && "OpenAI API — billed per token"}
-                      {selectedModel.provider === "ollama" && "Local model via Ollama"}
-                      {selectedModel.provider === "unknown" && "Unknown provider"}
-                    </span>
+                    {isProModel(selectedModel) && !isPro ? (
+                      <span className="text-xs text-amber-400">
+                        Pro only —{" "}
+                        <Link href="/settings" className="underline hover:text-amber-300">Upgrade to unlock</Link>
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-500">
+                        {selectedModel.provider === "groq" && "Fast inference via Groq Cloud"}
+                        {selectedModel.provider === "anthropic" && "Claude model via Anthropic API"}
+                        {selectedModel.provider === "openai" && "OpenAI API — billed per token"}
+                        {selectedModel.provider === "ollama" && "Local model via Ollama"}
+                        {selectedModel.provider === "unknown" && "Unknown provider"}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -452,7 +481,14 @@ export default function HomePage() {
                 )}
               </div>
 
-              {formError && <p className="text-red-400 text-sm">{formError}</p>}
+              {formError && (
+                <div className="bg-red-900/30 border border-red-700 rounded-lg p-3">
+                  <p className="text-red-400 text-sm">{formError}</p>
+                  {(formError.includes("Pro") || formError.includes("upgrade") || formError.includes("limit")) && (
+                    <Link href="/settings" className="text-xs text-amber-400 underline mt-1 block">Go to Settings → Upgrade to Pro</Link>
+                  )}
+                </div>
+              )}
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)}
                   className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">Cancel</button>

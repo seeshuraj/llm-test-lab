@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-LLM%20Test%20Lab%20Eval-blue?logo=github)](https://github.com/marketplace/actions/llm-test-lab-eval)
 [![GitHub stars](https://img.shields.io/github/stars/seeshuraj/llm-test-lab?style=social)](https://github.com/seeshuraj/llm-test-lab/stargazers)
+[![GitHub Discussions](https://img.shields.io/github/discussions/seeshuraj/llm-test-lab?label=Discussions&logo=github)](https://github.com/seeshuraj/llm-test-lab/discussions)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/llm-test-lab)
 
 **LLM Test Lab** is an open-source LLM evaluation platform. Write scenarios in YAML, point it at any HTTP endpoint, and get automated quality scores — faithfulness, relevancy, grounding — tracked over time and wired into your CI pipeline.
 
@@ -15,7 +17,9 @@ Built for AI engineers and teams shipping RAG apps, chatbots, and LLM-powered fe
 🌐 **Landing:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)  
 📊 **Dashboard:** [llm-test-lab-app.vercel.app](https://llm-test-lab-app.vercel.app)  
 📦 **API:** [llm-test-lab.fly.dev/health](https://llm-test-lab.fly.dev/health)  
-🛒 **GitHub Action:** [marketplace/actions/llm-test-lab-eval](https://github.com/marketplace/actions/llm-test-lab-eval)
+🛒 **GitHub Action:** [marketplace/actions/llm-test-lab-eval](https://github.com/marketplace/actions/llm-test-lab-eval)  
+💬 **Discussions:** [github.com/seeshuraj/llm-test-lab/discussions](https://github.com/seeshuraj/llm-test-lab/discussions)  
+🎮 **Discord:** [discord.gg/llm-test-lab](https://discord.gg/llm-test-lab)
 
 ---
 
@@ -61,6 +65,7 @@ No vendor lock-in. No SDK integration. Works with any RAG pipeline, LangChain ap
 | **HTTP-first** | Works with any endpoint — no SDK, no code changes |
 | **Slack alerts** | Notify your team when scores drop below threshold |
 | **Auth + projects** | Multi-user dashboard, JWT auth, per-project run history |
+| **Pro plan** | Unlimited runs + Claude models via Stripe billing |
 
 ---
 
@@ -181,6 +186,7 @@ llm-test-lab/
 | Database | PostgreSQL | Supabase |
 | AI / Judge | Groq — Llama 3.1 8B, Llama 3.3 70B | — |
 | Auth | JWT (python-jose + bcrypt) | — |
+| Billing | Stripe Checkout + webhooks | — |
 | Alerts | Slack Webhooks, Resend (email) | — |
 
 ---
@@ -195,6 +201,10 @@ llm-test-lab/
 | `SUPABASE_DB_URL` | ✅ | `postgresql://postgres:[pass]@db.[ref].supabase.co:5432/postgres` |
 | `SECRET_KEY` | ✅ | `openssl rand -hex 32` |
 | `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs |
+| `STRIPE_SECRET_KEY` | Pro billing | `sk_live_...` from Stripe Dashboard |
+| `STRIPE_WEBHOOK_SECRET` | Pro billing | `whsec_...` from Stripe → Webhooks |
+| `STRIPE_PRO_PRICE_ID` | Pro billing | `price_...` from Stripe → Products |
+| `FRONTEND_URL` | Pro billing | e.g. `https://llm-test-lab-app.vercel.app` |
 | `SLACK_WEBHOOK_URL` | optional | Slack alerts on score regression |
 | `RESEND_API_KEY` | optional | Email alerts via [resend.com](https://resend.com) |
 
@@ -210,6 +220,14 @@ llm-test-lab/
 
 ---
 
+## 💬 Community
+
+- **GitHub Discussions** — questions, ideas, show & tell → [github.com/seeshuraj/llm-test-lab/discussions](https://github.com/seeshuraj/llm-test-lab/discussions)
+- **Discord** — real-time chat with contributors → [discord.gg/llm-test-lab](https://discord.gg/llm-test-lab)
+- **Issues** — bug reports and feature requests → [github.com/seeshuraj/llm-test-lab/issues](https://github.com/seeshuraj/llm-test-lab/issues)
+
+---
+
 ## 📊 Roadmap
 
 - [x] Multi-model eval engine
@@ -220,12 +238,13 @@ llm-test-lab/
 - [x] A/B run comparison
 - [x] CI/CD GitHub Action (`uses: seeshuraj/llm-test-lab@v1`)
 - [x] Slack alerts on score regression
-- [x] Deployed on Fly.io (always-on)
-- [ ] Live demo (no signup required)
-- [ ] Claude as judge (alongside Groq)
-- [ ] Threshold alerts + drift detection
+- [x] Claude as judge (Pro plan)
+- [x] Stripe billing (Free / Pro tiers)
+- [x] GitHub Discussions + Discord community
+- [ ] Custom metrics API
+- [ ] Multi-turn agent testing
 - [ ] PyPI SDK package (`pip install llm-test-lab`)
-- [ ] Stripe billing (Free / Pro / Teams)
+- [ ] SSO / SAML (Enterprise)
 
 ---
 
@@ -238,7 +257,7 @@ Contributions are welcome — especially:
 - SDK improvements (Python, JS)
 - Bug fixes and docs
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) to get started. If you're unsure where to begin, open an issue and say hi.
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get started. If you're unsure where to begin, open a [Discussion](https://github.com/seeshuraj/llm-test-lab/discussions) and say hi.
 
 ---
 
