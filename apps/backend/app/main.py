@@ -26,7 +26,7 @@ from .models import Run, RunScenarioResult, User
 from .rag_metrics import compute_rag_metrics
 
 from llm_test_lab_core.models import Variant
-from llm_test_lab_core.judges_groq import GroqJudgeClient
+from llm_test_lab_core.judge_factory import get_judge, SUPPORTED_MODELS as _CORE_MODELS
 from llm_test_lab.scenarios_yaml import load_scenarios_from_string
 from llm_test_lab.runner_local import run_suite
 
@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("llm_test_lab")
 
 # ---------------------------------------------------------------------------
-# Rate limiter (abuse protection — short-burst)
+# Rate limiter
 # ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
 
@@ -88,14 +88,19 @@ DEFAULT_RUBRIC = (
     "Rules: "
     "(1) If the context contains relevant information, the answer must use it accurately — score high for correct grounding, low for contradictions or hallucinations. "
     "(2) If the context does NOT contain relevant information for the question, a correct refusal such as "
-    "'I don't know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
+    "'I don\'t know based on the provided context' or 'The context does not cover this' should score 0.85 or above. "
     "(3) If the context is irrelevant but the model answers correctly from general knowledge, score 0.3-0.5 — the answer may be factually right but it is not grounded. "
     "(4) Penalise any answer that contradicts the context, regardless of whether the contradiction is factually correct in the real world."
 )
 
-SUPPORTED_MODELS = [
-    "llama-3.1-8b-instant",
-    "llama-3.3-70b-versatile",
+# ---------------------------------------------------------------------------
+# Supported models: sourced from core package + allow Claude if key is set
+# ---------------------------------------------------------------------------
+_SUPPORTED_MODEL_IDS: list[str] = [m["id"] for m in _CORE_MODELS]
+
+# Exclude Ollama (local) from the public API — only relevant for CLI/self-hosted
+_PUBLIC_MODEL_IDS: list[str] = [
+    m["id"] for m in _CORE_MODELS if m["provider"] != "ollama"
 ]
 
 _APP_ENDPOINT_TIMEOUT = float(os.environ.get("APP_ENDPOINT_TIMEOUT", "90"))
@@ -103,7 +108,6 @@ _APP_ENDPOINT_TIMEOUT = float(os.environ.get("APP_ENDPOINT_TIMEOUT", "90"))
 # ---------------------------------------------------------------------------
 # Free trial config
 # ---------------------------------------------------------------------------
-# Override by setting FREE_TRIAL_RUN_LIMIT env var (set to 0 to disable cap).
 FREE_TRIAL_RUN_LIMIT = int(os.environ.get("FREE_TRIAL_RUN_LIMIT", "5"))
 
 _user_last_run: dict[str, float] = defaultdict(float)
@@ -127,13 +131,8 @@ def _check_rate_limit(user_id: str):
 
 
 async def _check_trial_limit(user_id: str, db: AsyncSession):
-    """Block users who have exhausted their free trial run quota.
-
-    Set FREE_TRIAL_RUN_LIMIT=0 to disable the cap entirely (e.g. for Pro users
-    once billing is wired up).
-    """
     if FREE_TRIAL_RUN_LIMIT <= 0:
-        return  # cap disabled
+        return
     result = await db.execute(
         select(func.count()).select_from(Run).where(Run.user_id == user_id)
     )
@@ -173,6 +172,14 @@ class RunLabelUpdate(BaseModel):
     run_label: str
 
 
+class MetricScoreOut(BaseModel):
+    """Individual RAG metric score returned in the API response."""
+    name: str
+    score: float
+    reason: str = ""
+    judge_model: str = ""
+
+
 class ScenarioResultOut(BaseModel):
     scenario_id: str
     variant_id: str
@@ -180,7 +187,13 @@ class ScenarioResultOut(BaseModel):
     reason: str
     latency_ms: float
     judge_model: str
+    # Legacy flat dict (kept for backwards compat with existing dashboard)
     rag_scores: Optional[dict] = None
+    # New structured per-metric breakdown
+    faithfulness: Optional[MetricScoreOut] = None
+    answer_relevancy: Optional[MetricScoreOut] = None
+    context_recall: Optional[MetricScoreOut] = None
+    context_precision: Optional[MetricScoreOut] = None
 
 
 class RunOut(BaseModel):
@@ -201,6 +214,24 @@ class RunOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _metric_score_out(rag_scores_dict: Optional[dict], key: str) -> Optional[MetricScoreOut]:
+    """Extract a named metric from the stored rag_scores dict."""
+    if not rag_scores_dict:
+        return None
+    m = rag_scores_dict.get(key)
+    if not m:
+        return None
+    if isinstance(m, dict):
+        return MetricScoreOut(
+            name=key,
+            score=m.get("score", 0.0),
+            reason=m.get("reason", ""),
+            judge_model=m.get("judge_model", ""),
+        )
+    # Legacy flat scalar
+    return MetricScoreOut(name=key, score=float(m))
+
 
 async def _build_run_out(run: Run, results: list) -> RunOut:
     avg = sum(r.score for r in results) / len(results) if results else 0.0
@@ -224,6 +255,10 @@ async def _build_run_out(run: Run, results: list) -> RunOut:
                 latency_ms=r.latency_ms,
                 judge_model=r.judge_model,
                 rag_scores=r.rag_scores,
+                faithfulness=_metric_score_out(r.rag_scores, "faithfulness"),
+                answer_relevancy=_metric_score_out(r.rag_scores, "answer_relevancy"),
+                context_recall=_metric_score_out(r.rag_scores, "context_recall"),
+                context_precision=_metric_score_out(r.rag_scores, "context_precision"),
             )
             for r in results
         ],
@@ -250,24 +285,40 @@ async def _get_run_with_results(run_id: str, user_id: str, db: AsyncSession) -> 
 
 @app.get("/api/models")
 def list_models():
-    return {"models": SUPPORTED_MODELS}
+    """Return supported judge models with provider + tier metadata."""
+    return {
+        # Legacy flat list (kept for backwards compat)
+        "models": _PUBLIC_MODEL_IDS,
+        # New rich list consumed by the dashboard model picker
+        "models_detail": [
+            m for m in _CORE_MODELS if m["provider"] != "ollama"
+        ],
+    }
 
 
 @app.post("/api/run-local", response_model=RunOut)
-@limiter.limit("10/minute")  # abuse protection on top of trial cap
+@limiter.limit("10/minute")
 async def run_local(
     request: Request,
     req: RunLocalRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await _check_trial_limit(current_user.id, db)  # lifetime cap check
-    _check_rate_limit(current_user.id)              # cooldown check
+    await _check_trial_limit(current_user.id, db)
+    _check_rate_limit(current_user.id)
 
-    if req.model_name not in SUPPORTED_MODELS:
+    if req.model_name not in _PUBLIC_MODEL_IDS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported model '{req.model_name}'. Supported: {SUPPORTED_MODELS}"
+            detail=f"Unsupported model '{req.model_name}'. Supported: {_PUBLIC_MODEL_IDS}"
+        )
+
+    # Validate Claude key present if a Claude model was requested
+    _model_meta = next((m for m in _CORE_MODELS if m["id"] == req.model_name), {})
+    if _model_meta.get("provider") == "claude" and not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            status_code=400,
+            detail="ANTHROPIC_API_KEY is not configured on this server. Use a Groq model instead."
         )
 
     try:
@@ -283,7 +334,8 @@ async def run_local(
         model_name=req.model_name,
     )
 
-    judge = GroqJudgeClient(model=req.model_name)
+    # Use judge_factory — routes to Groq, Claude, or Ollama automatically
+    judge = get_judge(req.model_name)
 
     if req.app_endpoint_url:
         async def app_call(question: str, context: str = "") -> str:
@@ -450,7 +502,7 @@ async def rerun(
     if not original.scenarios_yaml:
         raise HTTPException(status_code=400, detail="Original run has no stored YAML - cannot re-run")
 
-    model = original.model_name if original.model_name in SUPPORTED_MODELS else SUPPORTED_MODELS[0]
+    model = original.model_name if original.model_name in _PUBLIC_MODEL_IDS else _PUBLIC_MODEL_IDS[0]
 
     req = RunLocalRequest(
         project=original.project,
