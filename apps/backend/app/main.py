@@ -35,6 +35,7 @@ from .auth import (
 from .billing import router as billing_router
 from .datasets import router as datasets_router
 from .db import get_db, init_db
+from .judges import ANTHROPIC_MODELS, judge_factory
 from .models import ApiKey, Run, RunScenarioResult, ScenarioDataset, User
 from .notifications import send_threshold_alert
 from .rag_metrics import compute_rag_metrics
@@ -120,6 +121,7 @@ class ModelDetailOut(BaseModel):
     name: str
     provider: str
     description: str
+    pro_only: bool = False
 
 
 class RunRequest(BaseModel):
@@ -240,13 +242,17 @@ async def me(current_user: User = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 _MODELS: list[ModelDetailOut] = [
-    ModelDetailOut(id="llama3-8b-8192", name="Llama 3 8B", provider="Groq", description="Fast, capable open model via Groq"),
-    ModelDetailOut(id="llama3-70b-8192", name="Llama 3 70B", provider="Groq", description="Larger Llama 3 via Groq"),
-    ModelDetailOut(id="mixtral-8x7b-32768", name="Mixtral 8x7B", provider="Groq", description="MoE model via Groq"),
-    ModelDetailOut(id="gemma-7b-it", name="Gemma 7B", provider="Groq", description="Google Gemma 7B via Groq"),
-    ModelDetailOut(id="claude-3-haiku-20240307", name="Claude 3 Haiku", provider="Anthropic", description="Fastest Claude model"),
-    ModelDetailOut(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", provider="Anthropic", description="Balanced Claude model"),
-    ModelDetailOut(id="claude-3-opus-20240229", name="Claude 3 Opus", provider="Anthropic", description="Most capable Claude model"),
+    # Free tier — Groq-hosted open models
+    ModelDetailOut(id="llama3-8b-8192",      name="Llama 3 8B",    provider="Groq",      description="Fast, capable open model via Groq",    pro_only=False),
+    ModelDetailOut(id="llama3-70b-8192",     name="Llama 3 70B",   provider="Groq",      description="Larger Llama 3 via Groq",               pro_only=False),
+    ModelDetailOut(id="mixtral-8x7b-32768",  name="Mixtral 8x7B",  provider="Groq",      description="MoE model via Groq",                    pro_only=False),
+    ModelDetailOut(id="gemma-7b-it",         name="Gemma 7B",      provider="Groq",      description="Google Gemma 7B via Groq",              pro_only=False),
+    # Pro tier — Anthropic Claude (costs real money, Pro users only)
+    ModelDetailOut(id="claude-3-haiku-20240307",      name="Claude 3 Haiku",       provider="Anthropic", description="Fastest Claude model — Pro only",           pro_only=True),
+    ModelDetailOut(id="claude-3-5-haiku-20241022",    name="Claude 3.5 Haiku",     provider="Anthropic", description="Fastest Claude 3.5 model — Pro only",       pro_only=True),
+    ModelDetailOut(id="claude-3-sonnet-20240229",     name="Claude 3 Sonnet",      provider="Anthropic", description="Balanced Claude model — Pro only",           pro_only=True),
+    ModelDetailOut(id="claude-3-5-sonnet-20241022",   name="Claude 3.5 Sonnet",    provider="Anthropic", description="Most capable mid-tier Claude — Pro only",    pro_only=True),
+    ModelDetailOut(id="claude-3-opus-20240229",       name="Claude 3 Opus",        provider="Anthropic", description="Most capable Claude model — Pro only",       pro_only=True),
 ]
 
 
@@ -258,9 +264,6 @@ async def list_models():
 # ---------------------------------------------------------------------------
 # Run execution
 # ---------------------------------------------------------------------------
-
-from .judges import judge_factory  # noqa: E402
-
 
 async def _get_llm_answer(
     *,
@@ -306,7 +309,18 @@ async def create_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Free-trial gate — Pro users have unlimited runs
+    # --- Pro gate: Claude models are restricted to Pro users ---
+    if body.model_name in ANTHROPIC_MODELS and not current_user.is_pro:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Claude models are available on the Pro plan only. "
+                "Upgrade to Pro or choose a Groq model (Llama 3, Mixtral, Gemma)."
+            ),
+            headers={"X-Upgrade-URL": "/billing/checkout"},
+        )
+
+    # --- Free-trial gate: limit total runs for free users ---
     if not current_user.is_pro:
         run_count_result = await db.execute(
             select(func.count(Run.id)).where(Run.user_id == current_user.id)
