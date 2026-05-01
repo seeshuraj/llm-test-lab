@@ -18,6 +18,9 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    # Billing
+    is_pro: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     runs: Mapped[list["Run"]] = relationship("Run", back_populates="user", cascade="all, delete-orphan")
     api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
@@ -55,13 +58,12 @@ class ScenarioDataset(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     project: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)          # e.g. "rag-v1"
-    version_hash: Mapped[str] = mapped_column(String, nullable=False)  # SHA-256 hex
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    version_hash: Mapped[str] = mapped_column(String, nullable=False)
     yaml_content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
-    # NULL means this is the first version of this (project, name) dataset
     parent_version_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("scenario_datasets.id"), nullable=True
     )
@@ -87,11 +89,9 @@ class Run(Base):
     scenarios_yaml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rubric: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     app_endpoint_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # FK to the dataset version used for this run (nullable for legacy runs)
     dataset_version_id: Mapped[Optional[str]] = mapped_column(
         String, ForeignKey("scenario_datasets.id"), nullable=True
     )
-    # Public share flag — when True, GET /api/runs/{id}/share is accessible without auth
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
 
     user: Mapped["User"] = relationship("User", back_populates="runs")

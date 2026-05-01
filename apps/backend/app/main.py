@@ -32,6 +32,7 @@ from .auth import (
     verify_password,
     verify_api_key,
 )
+from .billing import router as billing_router
 from .datasets import router as datasets_router
 from .db import get_db, init_db
 from .models import ApiKey, Run, RunScenarioResult, ScenarioDataset, User
@@ -45,22 +46,28 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    # Ensure is_public column exists for existing deployments (safe no-op if already present)
+    # Safe column migrations for existing deployments
     async for db in get_db():
         try:
             await db.execute(text(
                 "ALTER TABLE runs ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            await db.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_pro BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            await db.execute(text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"
+            ))
             await db.commit()
         except Exception as exc:
-            logger.warning("Migration skip (is_public): %s", exc)
+            logger.warning("Migration skip: %s", exc)
         break
     yield
 
 
 app = FastAPI(
     title="LLM Test Lab API",
-    version="0.5.0",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -86,6 +93,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(api_keys_router, prefix="/api-keys")
 app.include_router(datasets_router, prefix="/datasets")
+app.include_router(billing_router, prefix="/billing")
 
 # ---------------------------------------------------------------------------
 # Free-trial gate
@@ -163,7 +171,6 @@ class RunSummaryOut(BaseModel):
     is_public: bool = False
 
 
-# Schema for the public share endpoint — matches the frontend Run type exactly
 class ShareScenarioResultOut(BaseModel):
     scenario_id: str
     score: float
@@ -221,7 +228,11 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
 
 @app.get("/auth/me")
 async def me(current_user: User = Depends(get_current_user)):
-    return {"id": current_user.id, "email": current_user.email}
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "is_pro": current_user.is_pro,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +259,7 @@ async def list_models():
 # Run execution
 # ---------------------------------------------------------------------------
 
-from .judges import judge_factory  # noqa: E402  (avoid circular at top)
+from .judges import judge_factory  # noqa: E402
 
 
 async def _get_llm_answer(
@@ -258,7 +269,6 @@ async def _get_llm_answer(
     model_name: str,
     app_endpoint_url: Optional[str],
 ) -> tuple[str, float]:
-    """Call the LLM (or app endpoint) and return (answer, latency_ms)."""
     t0 = time.monotonic()
     if app_endpoint_url:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -296,16 +306,21 @@ async def create_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Free-trial gate
-    run_count_result = await db.execute(
-        select(func.count(Run.id)).where(Run.user_id == current_user.id)
-    )
-    run_count = run_count_result.scalar_one()
-    if run_count >= FREE_TRIAL_RUN_LIMIT:
-        raise HTTPException(
-            status_code=402,
-            detail=f"Free trial limit of {FREE_TRIAL_RUN_LIMIT} runs reached. Upgrade to Pro.",
+    # Free-trial gate — Pro users have unlimited runs
+    if not current_user.is_pro:
+        run_count_result = await db.execute(
+            select(func.count(Run.id)).where(Run.user_id == current_user.id)
         )
+        run_count = run_count_result.scalar_one()
+        if run_count >= FREE_TRIAL_RUN_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Free trial limit of {FREE_TRIAL_RUN_LIMIT} runs reached. "
+                    "Upgrade to Pro to run unlimited evaluations."
+                ),
+                headers={"X-Upgrade-URL": "/billing/checkout"},
+            )
 
     scenarios_yaml = body.scenarios_yaml
     dataset_version_id = body.dataset_version_id
@@ -529,10 +544,6 @@ async def get_shared_run(
     run_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Public endpoint — no auth required.
-    Returns the run only if is_public=True.
-    """
     result = await db.execute(
         select(Run)
         .options(selectinload(Run.results))
@@ -563,10 +574,6 @@ async def toggle_run_share(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Toggle public sharing for a run. Auth required — only the owner can share.
-    PATCH /api/runs/{run_id}/share  { "is_public": true }
-    """
     result = await db.execute(
         select(Run)
         .options(selectinload(Run.results))
@@ -602,4 +609,4 @@ async def toggle_run_share(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": "0.6.0"}
