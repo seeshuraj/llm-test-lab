@@ -1,70 +1,132 @@
 # 🧪 LLM Test Lab
 
-> Evaluate your AI app before your users do.
+> **Catch AI regressions before your users do.**  
+> Automated evaluation for RAG pipelines and LLM endpoints — no SDK required.
 
 [![CI](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml/badge.svg)](https://github.com/seeshuraj/llm-test-lab/actions/workflows/llm-eval.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Marketplace](https://img.shields.io/badge/Marketplace-LLM%20Test%20Lab%20Eval-blue?logo=github)](https://github.com/marketplace/actions/llm-test-lab-eval)
 [![GitHub stars](https://img.shields.io/github/stars/seeshuraj/llm-test-lab?style=social)](https://github.com/seeshuraj/llm-test-lab/stargazers)
 
-LLM Test Lab is an **open-source evaluation platform** for AI apps. Point it at any RAG pipeline or LLM endpoint — it scores every answer on faithfulness, relevancy, and grounding, tracks quality over time, and fails your CI when regressions slip through.
+**LLM Test Lab** is an open-source LLM evaluation platform. Write scenarios in YAML, point it at any HTTP endpoint, and get automated quality scores — faithfulness, relevancy, grounding — tracked over time and wired into your CI pipeline.
 
-🌐 **Landing Page:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)  
-📊 **Live Dashboard:** [llm-test-lab-app.vercel.app](https://llm-test-lab-app.vercel.app)  
-📦 **Backend API:** [llm-test-lab-api.fly.dev/health](https://llm-test-lab-api.fly.dev/health)  
-🛒 **GitHub Marketplace:** [LLM Test Lab Eval](https://github.com/marketplace/actions/llm-test-lab-eval)
+Built for AI engineers and teams shipping RAG apps, chatbots, and LLM-powered features who need a fast, framework-agnostic way to catch quality regressions **before** they reach production.
+
+🌐 **Landing:** [llm-test-lab-landing.vercel.app](https://llm-test-lab-landing.vercel.app)  
+📊 **Dashboard:** [llm-test-lab-app.vercel.app](https://llm-test-lab-app.vercel.app)  
+📦 **API:** [llm-test-lab.fly.dev/health](https://llm-test-lab.fly.dev/health)  
+🛒 **GitHub Action:** [marketplace/actions/llm-test-lab-eval](https://github.com/marketplace/actions/llm-test-lab-eval)
 
 ---
 
-## 🎬 Dashboard Demo
+## 🎬 See It in Action
+
+**Dashboard**
 
 ![LLM Test Lab Dashboard](LLM-Test-Lab.gif)
 
----
-
-## 🏠 Landing Page
+**Landing Page**
 
 ![LLM Test Lab Landing Page](Landing-Page.gif)
 
 ---
 
-## ✨ Features
+## Why LLM Test Lab?
 
-- **RAG metrics** — Faithfulness, Context Recall, Answer Relevancy, Context Precision
-- **LLM-as-judge scoring** — Automated 0–1 scores via Groq (Llama 3.1 / 3.3)
-- **Score trend charts** — Track quality over time per project
-- **A/B comparison** — Side-by-side score deltas between two runs
-- **Latency tracking** — Real response time per scenario
-- **CI/CD integration** — GitHub Action that fails your build on regressions
-- **Works with any HTTP endpoint** — No SDK required
-- **Slack alerts** — Notify your team when scores drop below threshold
+You wouldn't ship backend code without tests. But most teams ship LLM changes with zero automated quality checks.
+
+When you swap a model, tweak a prompt, or change your retrieval logic — **how do you know if it got better or worse?**
+
+LLM Test Lab answers that question systematically:
+
+- ✅ Define what "good" looks like in a YAML file
+- ✅ Run automated scoring against any endpoint after every deploy
+- ✅ Track score trends over time so regressions surface immediately
+- ✅ Fail your CI build if quality drops below your threshold
+
+No vendor lock-in. No SDK integration. Works with any RAG pipeline, LangChain app, or custom LLM endpoint.
 
 ---
 
-## ⚡ Quickstart (3 commands)
+## ✨ Features
+
+| Feature | Description |
+|---|---|
+| **RAG metrics** | Faithfulness, Answer Relevancy, Context Precision, Context Recall |
+| **LLM-as-judge** | Automated 0–1 scores via Groq (Llama 3.1 / 3.3) |
+| **Score trend charts** | Visual quality history per project and per scenario |
+| **A/B run comparison** | Side-by-side score deltas between any two runs |
+| **Latency tracking** | Real response time per scenario, per run |
+| **CI/CD integration** | GitHub Action — fail builds on score regression |
+| **HTTP-first** | Works with any endpoint — no SDK, no code changes |
+| **Slack alerts** | Notify your team when scores drop below threshold |
+| **Auth + projects** | Multi-user dashboard, JWT auth, per-project run history |
+
+---
+
+## ⚡ Quickstart
+
+### 1. Clone and run locally (5 minutes)
 
 ```bash
-git clone https://github.com/seeshuraj/llm-test-lab.git && cd llm-test-lab
-pip install -r apps/backend/requirements.txt
+git clone https://github.com/seeshuraj/llm-test-lab.git
+cd llm-test-lab
+
+# Backend
 cp apps/backend/.env.example apps/backend/.env
-# Add GROQ_API_KEY to apps/backend/.env, then:
+# → Add your GROQ_API_KEY to .env
+pip install -r apps/backend/requirements.txt
 uvicorn apps.backend.app.main:app --reload
 ```
 
-Frontend:
 ```bash
-cd apps/frontend && npm install && cp .env.example .env.local && npm run dev
+# Frontend (new terminal)
+cd apps/frontend
+cp .env.example .env.local
+npm install && npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and click **+ New Run**.
+Open [http://localhost:3000](http://localhost:3000) → sign up → click **+ New Run**.
 
 ---
 
-## 🔌 GitHub Action — Add to Any Repo in 10 Lines
+### 2. Write your first scenario
+
+Create a `scenarios.yaml` pointing at your AI endpoint:
+
+```yaml
+scenarios:
+  - id: s1
+    question: "What is the refund policy?"
+    context: "Customers can request refunds within 30 days of purchase."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [refund, policy]
+
+  - id: s2
+    question: "How do I reset my password?"
+    context: "Go to Settings → Security → Reset Password."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [auth, onboarding]
+```
+
+Run it:
+
+```bash
+python cli/llm_eval.py \
+  --scenarios scenarios.yaml \
+  --api-url https://llm-test-lab.fly.dev \
+  --token YOUR_TOKEN
+```
+
+You'll get a run ID and scores immediately. View the full breakdown in the dashboard.
+
+---
+
+### 3. Add to CI — fail builds on regressions
 
 ```yaml
 # .github/workflows/eval.yml
-name: LLM Eval
+name: LLM Quality Gate
 on: [push]
 
 jobs:
@@ -78,19 +140,19 @@ jobs:
           token:   ${{ secrets.LLM_TEST_LAB_TOKEN }}
           app-url: https://your-ai-app.com/answer
           scenarios: scenarios.yaml
-          fail-under: '0.7'
+          fail-under: '0.7'   # ← CI fails if avg score drops below this
 ```
 
-**Inputs:**
+**GitHub Action inputs:**
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `api-url` | ✅ | — | Your LLM Test Lab backend URL |
+| `api-url` | ✅ | — | LLM Test Lab backend URL |
 | `token` | ✅ | — | API token from your dashboard |
 | `app-url` | ✅ | — | Your AI app's answer endpoint |
 | `scenarios` | — | `scenarios.yaml` | Path to scenarios file |
 | `project` | — | `my-project` | Project name for grouping runs |
-| `model` | — | `llama-3.1-8b-instant` | Judge model |
+| `model` | — | `llama-3.1-8b-instant` | Judge model (Groq) |
 | `fail-under` | — | `0.6` | Fail CI if avg score drops below this |
 
 ---
@@ -99,88 +161,84 @@ jobs:
 
 ```
 llm-test-lab/
-├── action.yml              # Reusable GitHub Action (Marketplace)
+├── action.yml                  # Reusable GitHub Action (Marketplace)
 ├── apps/
-│   ├── backend/            # FastAPI scoring engine + REST API (Fly.io)
-│   └── frontend/           # Dashboard: auth, runs, compare, trends (Vercel)
+│   ├── backend/                # FastAPI scoring engine + REST API  → Fly.io
+│   └── frontend/               # Next.js dashboard (auth, runs, trends, A/B) → Vercel
 ├── packages/
-│   ├── core-python/        # Shared Python judges + scoring
-│   └── sdk-python/         # Python SDK
+│   ├── core-python/            # Shared Python judges + scoring logic
+│   └── sdk-python/             # Python SDK
 ├── cli/
-│   └── llm_eval.py         # CI script invoked by action.yml
-└── .github/workflows/      # CI: unit tests + LLM eval on push
+│   └── llm_eval.py             # CI script called by action.yml
+├── scenarios.yaml              # Example scenario file
+└── .github/workflows/          # CI: unit tests + LLM eval on push
 ```
 
-| Layer | Stack | Host |
+| Layer | Stack | Hosting |
 |---|---|---|
-| Frontend | Next.js, TypeScript, Tailwind | Vercel |
-| Backend | FastAPI, Python 3.11 | Fly.io |
+| Frontend | Next.js 16, TypeScript, Tailwind CSS | Vercel |
+| Backend | FastAPI, Python 3.11, SQLAlchemy | Fly.io |
 | Database | PostgreSQL | Supabase |
-| AI / Judges | Groq — Llama 3.1 8B, 3.3 70B | — |
+| AI / Judge | Groq — Llama 3.1 8B, Llama 3.3 70B | — |
+| Auth | JWT (python-jose + bcrypt) | — |
+| Alerts | Slack Webhooks, Resend (email) | — |
 
 ---
 
 ## 🔑 Environment Variables
 
-### Backend (Fly.io secrets)
+### Backend (`apps/backend/.env`)
 
 | Variable | Required | Description |
 |---|---|---|
-| `GROQ_API_KEY` | ✅ | [console.groq.com](https://console.groq.com) |
+| `GROQ_API_KEY` | ✅ | Get at [console.groq.com](https://console.groq.com) |
 | `SUPABASE_DB_URL` | ✅ | `postgresql://postgres:[pass]@db.[ref].supabase.co:5432/postgres` |
 | `SECRET_KEY` | ✅ | `openssl rand -hex 32` |
 | `CORS_ALLOWED_ORIGINS` | ✅ | Comma-separated frontend URLs |
 | `SLACK_WEBHOOK_URL` | optional | Slack alerts on score regression |
 | `RESEND_API_KEY` | optional | Email alerts via [resend.com](https://resend.com) |
 
-### Frontend (Vercel env vars)
+> **No Supabase?** If `SUPABASE_DB_URL` is unset, the backend falls back to SQLite automatically — great for local dev.
+
+### Frontend (`apps/frontend/.env.local`)
 
 | Variable | Description |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | Backend URL, e.g. `https://llm-test-lab-api.fly.dev` |
+| `NEXT_PUBLIC_API_URL` | Backend URL, e.g. `https://llm-test-lab.fly.dev` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
-
-> **Local dev:** If `SUPABASE_DB_URL` is not set, backend falls back to SQLite automatically.
 
 ---
 
 ## 📊 Roadmap
 
 - [x] Multi-model eval engine
-- [x] LLM-as-judge scoring (Groq)
-- [x] RAG evaluation metrics
+- [x] LLM-as-judge scoring (Groq — Llama 3.1 / 3.3)
+- [x] RAG evaluation metrics (faithfulness, relevancy, precision, recall)
 - [x] Score history + trend charts
-- [x] Auth + personal dashboards
+- [x] Auth + per-user dashboards
 - [x] A/B run comparison
 - [x] CI/CD GitHub Action (`uses: seeshuraj/llm-test-lab@v1`)
 - [x] Slack alerts on score regression
 - [x] Deployed on Fly.io (always-on)
-- [ ] Live demo (no signup)
-- [ ] Drift detection alerts
-- [ ] npm / PyPI SDK packages
+- [ ] Live demo (no signup required)
+- [ ] Claude as judge (alongside Groq)
+- [ ] Threshold alerts + drift detection
+- [ ] PyPI SDK package (`pip install llm-test-lab`)
 - [ ] Stripe billing (Free / Pro / Teams)
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Tech |
-|---|---|
-| Frontend | Next.js 16, TypeScript, Tailwind CSS |
-| Backend | FastAPI, Python 3.11, SQLAlchemy |
-| Database | Supabase (PostgreSQL) / SQLite (local) |
-| AI / Judges | Groq — Llama 3.1 8B, Llama 3.3 70B |
-| Auth | JWT (python-jose + bcrypt) |
-| CI | GitHub Actions |
-| Hosting | Fly.io + Vercel |
-| Alerts | Slack Webhooks, Resend (email) |
 
 ---
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — especially new eval metrics, scenario templates, and SDK improvements.
+Contributions are welcome — especially:
+
+- New eval metrics (G-Eval, RAGAS-style, custom rubrics)
+- Scenario templates for common RAG use-cases
+- SDK improvements (Python, JS)
+- Bug fixes and docs
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to get started. If you're unsure where to begin, open an issue and say hi.
 
 ---
 
