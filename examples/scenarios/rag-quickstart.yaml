@@ -1,0 +1,61 @@
+# ============================================================
+# LLM Test Lab — RAG Quickstart Scenarios
+# Replace `endpoint` with your app's answer URL.
+#
+# Schema:
+#   id        — unique identifier for this scenario
+#   question  — the query sent to your AI endpoint
+#   context   — the retrieved context your RAG should use
+#   endpoint  — your AI app's /answer URL
+#   tags      — for filtering runs in the dashboard
+# ============================================================
+scenarios:
+
+  # ----------------------------------------------------------
+  # Category: Factual retrieval
+  # ----------------------------------------------------------
+  - id: faq-refund
+    question: "What is the refund policy?"
+    context: "Customers may request a full refund within 30 days of purchase by contacting support@example.com."
+    endpoint: "https://your-ai-app.com/answer"   # ← replace
+    tags: [faq, policy, refund]
+
+  - id: faq-shipping
+    question: "How long does shipping take?"
+    context: "Standard shipping takes 5-7 business days. Express shipping (2 days) is available for an additional $15."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [faq, shipping]
+
+  # ----------------------------------------------------------
+  # Category: Grounding / hallucination detection
+  # The answer should NOT fabricate details not in context.
+  # ----------------------------------------------------------
+  - id: grounding-price
+    question: "What is the price of the Pro plan?"
+    context: "We offer a Free plan and a Teams plan. Pricing details are available at example.com/pricing."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [grounding, pricing, hallucination]
+
+  - id: grounding-feature
+    question: "Does the product support SSO?"
+    context: "Single Sign-On (SSO) is available on the Enterprise plan. Contact sales for details."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [grounding, feature, enterprise]
+
+  # ----------------------------------------------------------
+  # Category: Out-of-context (should gracefully decline)
+  # ----------------------------------------------------------
+  - id: out-of-context
+    question: "What is the capital of France?"
+    context: "This document covers our return and refund procedures."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [edge-case, out-of-context]
+
+  # ----------------------------------------------------------
+  # Category: Multi-hop reasoning
+  # ----------------------------------------------------------
+  - id: multihop-eligibility
+    question: "Am I eligible for a refund if I bought 25 days ago?"
+    context: "Customers may request a full refund within 30 days of purchase. Refunds are processed within 5 business days."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [reasoning, refund, multihop]

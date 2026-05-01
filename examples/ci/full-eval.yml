@@ -1,0 +1,172 @@
+# ============================================================
+# LLM Test Lab — Full CI Integration
+# Includes: health checks, score threshold gate, PR comment
+# with score summary, and Slack alert on regression.
+#
+# Required secrets:
+#   LLM_TEST_LAB_TOKEN    — API token from the dashboard
+#   SLACK_WEBHOOK_URL     — (optional) Slack incoming webhook
+#
+# Required variables:
+#   LLM_TEST_LAB_API_URL  — your LLM Test Lab backend URL
+# ============================================================
+name: LLM Quality Gate (Full)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ----------------------------------------------------------
+  # Step 1: Wake backend (handles cold starts on free tiers)
+  # ----------------------------------------------------------
+  warm-up:
+    name: ⏳ Wake Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          echo "Waking backend..."
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              --max-time 15 \
+              "${{ vars.LLM_TEST_LAB_API_URL }}/health" || echo "000")
+            echo "  Attempt $i/6: HTTP $STATUS"
+            [ "$STATUS" = "200" ] && echo "✅ Backend ready" && exit 0
+            sleep 5
+          done
+          echo "❌ Backend did not respond in time."
+          exit 1
+
+  # ----------------------------------------------------------
+  # Step 2: Run LLM evaluation
+  # ----------------------------------------------------------
+  evaluate:
+    name: 🤖 LLM Eval
+    runs-on: ubuntu-latest
+    needs: warm-up
+    outputs:
+      score: ${{ steps.eval.outputs.avg_score }}
+      run_id: ${{ steps.eval.outputs.run_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CLI deps
+        run: pip install pyyaml requests
+
+      - name: 🚀 Run evaluation
+        id: eval
+        env:
+          LLM_TEST_LAB_TOKEN: ${{ secrets.LLM_TEST_LAB_TOKEN }}
+        run: |
+          python -c "
+import subprocess, sys, os, json
+
+result = subprocess.run([
+    'python', 'cli/llm_eval.py',
+    '--api-url',    os.environ['LLM_TEST_LAB_API_URL'],
+    '--token',      os.environ['LLM_TEST_LAB_TOKEN'],
+    '--scenarios',  'scenarios.yaml',
+    '--app-url',    'https://your-ai-app.com/answer',   # ← replace
+    '--project',    'my-project',
+    '--variant',    os.environ.get('GITHUB_SHA', 'dev')[:7],
+    '--run-label',  f\"CI: {os.environ.get('GITHUB_REF_NAME', 'main')}\",
+    '--model',      'llama-3.1-8b-instant',
+    '--fail-under', '0.7',
+    '--json-output', '/tmp/eval_result.json',
+], capture_output=True, text=True)
+
+print(result.stdout)
+print(result.stderr, file=sys.stderr)
+
+try:
+    with open('/tmp/eval_result.json') as f:
+        data = json.load(f)
+    avg = data.get('average_score', 0)
+    run_id = data.get('run_id', '')
+    print(f'avg_score={avg}', file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+    print(f'run_id={run_id}', file=open(os.environ['GITHUB_OUTPUT'], 'a'))
+except Exception as e:
+    print(f'Warning: could not parse output: {e}', file=sys.stderr)
+
+sys.exit(result.returncode)
+"
+        env:
+          LLM_TEST_LAB_API_URL: ${{ vars.LLM_TEST_LAB_API_URL }}
+
+  # ----------------------------------------------------------
+  # Step 3: Post score as PR comment
+  # ----------------------------------------------------------
+  comment:
+    name: 💬 PR Score Comment
+    runs-on: ubuntu-latest
+    needs: evaluate
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post score summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const score = '${{ needs.evaluate.outputs.score }}';
+            const runId = '${{ needs.evaluate.outputs.run_id }}';
+            const apiUrl = '${{ vars.LLM_TEST_LAB_API_URL }}';
+            const threshold = 0.7;
+            const passed = parseFloat(score) >= threshold;
+            const emoji = passed ? '✅' : '❌';
+            const status = passed ? 'PASSED' : 'FAILED';
+
+            const body = [
+              `## ${emoji} LLM Quality Gate — ${status}`,
+              '',
+              `| Metric | Value |`,
+              `|--------|-------|`,
+              `| Avg Score | \`${score}\` |`,
+              `| Threshold | \`${threshold}\` |`,
+              `| Run ID | \`${runId}\` |`,
+              '',
+              `[View full results →](${apiUrl})`,
+            ].join('\n');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  # ----------------------------------------------------------
+  # Step 4: Slack alert on regression (main branch only)
+  # ----------------------------------------------------------
+  slack-alert:
+    name: 🔔 Slack Alert
+    runs-on: ubuntu-latest
+    needs: evaluate
+    if: failure() && github.ref == 'refs/heads/main' && secrets.SLACK_WEBHOOK_URL != ''
+    steps:
+      - name: Send Slack notification
+        run: |
+          curl -s -X POST '${{ secrets.SLACK_WEBHOOK_URL }}' \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "🚨 *LLM Quality Gate FAILED* on `${{ github.repository }}`",
+              "attachments": [{
+                "color": "danger",
+                "fields": [
+                  { "title": "Branch",  "value": "${{ github.ref_name }}",  "short": true },
+                  { "title": "Commit",  "value": "${{ github.sha }}",        "short": true },
+                  { "title": "Avg Score", "value": "${{ needs.evaluate.outputs.score }}", "short": true }
+                ],
+                "footer": "<${{ vars.LLM_TEST_LAB_API_URL }}|View Results>"
+              }]
+            }'

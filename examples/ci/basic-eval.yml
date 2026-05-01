@@ -1,0 +1,33 @@
+# ============================================================
+# LLM Test Lab — Basic CI Integration
+# Copy this into .github/workflows/llm-eval.yml in your repo.
+#
+# Required secrets:
+#   LLM_TEST_LAB_TOKEN  — your API token from the dashboard
+#
+# Required variables (Settings → Secrets and variables → Variables):
+#   LLM_TEST_LAB_API_URL — https://llm-test-lab.fly.dev (or your self-hosted URL)
+# ============================================================
+name: LLM Quality Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  eval:
+    name: 🤖 LLM Eval
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: seeshuraj/llm-test-lab@v1
+        with:
+          api-url:   ${{ vars.LLM_TEST_LAB_API_URL }}
+          token:     ${{ secrets.LLM_TEST_LAB_TOKEN }}
+          app-url:   https://your-ai-app.com/answer    # ← replace with your endpoint
+          scenarios: scenarios.yaml
+          fail-under: '0.7'                            # ← CI fails if avg score < 0.7

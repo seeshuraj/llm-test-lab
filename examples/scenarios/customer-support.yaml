@@ -1,0 +1,41 @@
+# ============================================================
+# LLM Test Lab — Customer Support Bot Scenarios
+# A ready-to-use scenario set for support chatbot evaluation.
+# ============================================================
+scenarios:
+
+  - id: cs-password-reset
+    question: "How do I reset my password?"
+    context: "To reset your password: go to Settings → Security → Reset Password. Enter your email and we'll send a reset link valid for 24 hours."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, auth, password]
+
+  - id: cs-cancel-subscription
+    question: "How do I cancel my subscription?"
+    context: "You can cancel your subscription anytime from Settings → Billing → Cancel Plan. Your access continues until the end of the current billing cycle."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, billing, cancel]
+
+  - id: cs-download-invoice
+    question: "Where can I download my invoice?"
+    context: "Invoices are available in Settings → Billing → Invoice History. Click Download PDF next to any billing period."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, billing, invoice]
+
+  - id: cs-upgrade-plan
+    question: "How do I upgrade to the Pro plan?"
+    context: "To upgrade, go to Settings → Billing → Change Plan and select Pro. Changes take effect immediately and you'll be charged a prorated amount."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, billing, upgrade]
+
+  - id: cs-data-export
+    question: "Can I export my data?"
+    context: "You can export all your data as a CSV or JSON from Settings → Data → Export. Exports are emailed to your registered address within 10 minutes."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, data, gdpr]
+
+  - id: cs-contact-human
+    question: "I want to speak to a human agent."
+    context: "Our support team is available Monday to Friday, 9am-6pm GMT. You can reach them via live chat (bottom right) or email support@example.com."
+    endpoint: "https://your-ai-app.com/answer"
+    tags: [support, escalation, human]
