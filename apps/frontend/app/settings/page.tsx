@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { authHeaders } from "@/lib/auth";
 
@@ -12,7 +12,8 @@ interface BillingStatus {
   stripe_customer_id: string | null;
 }
 
-export default function SettingsPage() {
+// Inner component that uses useSearchParams — must be inside <Suspense>
+function SettingsContent() {
   const searchParams = useSearchParams();
   const upgraded = searchParams.get("upgraded");
 
@@ -64,7 +65,6 @@ export default function SettingsPage() {
       <h1 className="text-2xl font-bold text-white mb-2">Settings</h1>
       <p className="text-gray-400 text-sm mb-8">Manage your account and billing.</p>
 
-      {/* Upgrade success banner */}
       {upgraded === "1" && (
         <div className="mb-6 bg-green-900/40 border border-green-700 rounded-xl p-4 flex items-center gap-3">
           <span className="text-2xl">🎉</span>
@@ -86,7 +86,6 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* Plan card */}
       <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 mb-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-semibold text-gray-300">Current Plan</h2>
@@ -139,7 +138,6 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Account info */}
       {billing && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Account</h2>
@@ -149,5 +147,18 @@ export default function SettingsPage() {
         </div>
       )}
     </main>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={
+      <main className="max-w-2xl mx-auto p-8">
+        <div className="h-8 w-32 bg-gray-800 rounded animate-pulse mb-4" />
+        <div className="h-4 w-64 bg-gray-800 rounded animate-pulse" />
+      </main>
+    }>
+      <SettingsContent />
+    </Suspense>
   );
 }
