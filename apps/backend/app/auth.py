@@ -41,19 +41,27 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
+# Alias used by main.py
+def get_password_hash(password: str) -> str:
+    return hash_password(password)
+
+
 def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(data: dict | str) -> str:
+    """Accept either a dict ({"sub": user_id}) or a bare user_id string."""
+    if isinstance(data, dict):
+        user_id = data.get("sub", "")
+    else:
+        user_id = data
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({"sub": user_id, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
 async def _update_key_last_used(key_id: str) -> None:
-    """Fire-and-forget: update last_used_at in a fresh session.
-    Called with asyncio.create_task so it never blocks or crashes the request.
-    """
+    """Fire-and-forget: update last_used_at in a fresh session."""
     try:
         async with AsyncSessionLocal() as db:
             res = await db.execute(
@@ -64,7 +72,6 @@ async def _update_key_last_used(key_id: str) -> None:
                 key.last_used_at = datetime.now(timezone.utc)
                 await db.commit()
     except Exception as e:
-        # Non-fatal — just log and swallow
         print(f"[auth] last_used_at update failed (non-fatal): {e}")
 
 
@@ -79,7 +86,6 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    # Extract raw token from Authorization header
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(
@@ -95,10 +101,6 @@ async def get_current_user(
     # Path A: API key (prefix ltk_) — used by CLI / CI
     # -------------------------------------------------------------------------
     if raw_token.startswith("ltk_"):
-        # Fast path: use the stored key_prefix to narrow to at most 1 candidate
-        # before running bcrypt (which is intentionally slow ~100ms/check).
-        # The first 12 chars of the raw key are stored as key_prefix on creation.
-        # This reduces bcrypt calls from O(n_keys) → O(1) in the common case.
         prefix = raw_token[:12]
 
         res = await db.execute(
@@ -109,9 +111,6 @@ async def get_current_user(
         )
         candidates = res.scalars().all()
 
-        # Fallback: handle legacy keys that pre-date the key_prefix column
-        # (key_prefix is NULL for keys created before this migration).
-        # Once all old keys are rotated, this branch can be removed.
         if not candidates:
             res2 = await db.execute(
                 select(models.ApiKey).where(
@@ -128,7 +127,7 @@ async def get_current_user(
                     matched_key = k
                     break
             except Exception:
-                continue  # malformed hash row — skip safely
+                continue
 
         if not matched_key:
             raise HTTPException(
@@ -140,7 +139,6 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Update last_used_at in background — NEVER commit on the request session
         import asyncio
         asyncio.create_task(_update_key_last_used(matched_key.id))
 
@@ -170,6 +168,11 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+# Stub for main.py import — actual API key auth is handled inside get_current_user
+async def verify_api_key(api_key: str, db: AsyncSession) -> models.User:
+    raise NotImplementedError("Use get_current_user directly")
 
 
 # ---------------------------------------------------------------------------
