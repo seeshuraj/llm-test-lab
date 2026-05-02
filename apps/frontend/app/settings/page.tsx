@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { authHeaders } from "@/lib/auth";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 interface BillingStatus {
   is_pro: boolean;
@@ -26,7 +28,7 @@ export default function SettingsPage() {
   async function fetchBillingStatus() {
     try {
       const res = await fetch(`${API_BASE}/billing/status`, {
-        headers: getAuthHeaders(),
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error("Failed to load billing status");
       const data = await res.json();
@@ -43,7 +45,7 @@ export default function SettingsPage() {
     try {
       const res = await fetch(`${API_BASE}/billing/checkout`, {
         method: "POST",
-        headers: getAuthHeaders(),
+        headers: authHeaders(),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -67,14 +69,14 @@ export default function SettingsPage() {
         <div className="mb-6 bg-green-900/40 border border-green-700 rounded-xl p-4 flex items-center gap-3">
           <span className="text-2xl">🎉</span>
           <div>
-            <p className="text-green-300 font-semibold">You're on Pro!</p>
+            <p className="text-green-300 font-semibold">You&apos;re on Pro!</p>
             <p className="text-green-400 text-sm">Unlimited evaluations are now unlocked.</p>
           </div>
         </div>
       )}
       {upgraded === "0" && (
         <div className="mb-6 bg-yellow-900/30 border border-yellow-700 rounded-xl p-4">
-          <p className="text-yellow-300 text-sm">Upgrade cancelled. You're still on the Free plan.</p>
+          <p className="text-yellow-300 text-sm">Upgrade cancelled. You&apos;re still on the Free plan.</p>
         </div>
       )}
 
