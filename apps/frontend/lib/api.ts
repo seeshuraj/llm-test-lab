@@ -30,7 +30,7 @@ export interface Run {
 /** Enriched model info returned by the backend. */
 export interface ModelDetail {
   id: string;
-  provider: "groq" | "openai" | "ollama" | "unknown";
+  provider: "groq" | "openai" | "ollama" | "anthropic" | "unknown";
   display_name?: string;
 }
 
@@ -110,15 +110,20 @@ export async function fetchModels(): Promise<ModelDetail[]> {
     // Hardcoded fallback so the UI is never empty
     return [
       { id: "llama-3.1-8b-instant", provider: "groq" },
-      { id: "llama3-70b-8192", provider: "groq" },
-      { id: "gpt-4o-mini", provider: "openai" },
-      { id: "gpt-4o", provider: "openai" },
+      { id: "llama3-70b-8192",       provider: "groq" },
+      { id: "gpt-4o-mini",           provider: "openai" },
+      { id: "gpt-4o",               provider: "openai" },
+      { id: "claude-3-5-haiku-20241022", provider: "anthropic" },
+      { id: "claude-3-5-sonnet-20241022", provider: "anthropic" },
     ];
   }
 }
 
 /** Infer provider from model id string. */
 function inferModelDetail(id: string): ModelDetail {
+  if (id.startsWith("claude")) {
+    return { id, provider: "anthropic" };
+  }
   if (id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3")) {
     return { id, provider: "openai" };
   }
@@ -143,7 +148,7 @@ export function exportRunCSV(run: Run): void {
     r.faithfulness ?? "",
     r.context_precision ?? "",
     r.answer_relevance ?? "",
-    `"${r.reason.replace(/"/g, "'")}"`
+    `"${r.reason.replace(/"/g, "'")}"`,
   ]);
   const csv = [header, ...rows].map((row) => row.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
