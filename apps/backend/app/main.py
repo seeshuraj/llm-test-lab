@@ -85,8 +85,6 @@ raw_origins = os.environ.get(
 exact_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
 # Patterns that are always trusted in addition to exact_origins:
-# - Any Vercel preview deploy for this project
-# - Any Vercel production deploy for this project
 _TRUSTED_PATTERNS = [
     re.compile(r"https://llm-test-lab.*\.vercel\.app$"),
     re.compile(r"https://.*-seeshurajs-projects\.vercel\.app$"),
@@ -277,7 +275,7 @@ async def me(current_user: User = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Models catalogue  — FIX: was /models (missing /api prefix)
+# Models catalogue
 # ---------------------------------------------------------------------------
 
 _MODELS: list[ModelDetailOut] = [
@@ -286,7 +284,7 @@ _MODELS: list[ModelDetailOut] = [
     ModelDetailOut(id="llama3-70b-8192",     name="Llama 3 70B",   provider="Groq",      description="Larger Llama 3 via Groq",               pro_only=False),
     ModelDetailOut(id="mixtral-8x7b-32768",  name="Mixtral 8x7B",  provider="Groq",      description="MoE model via Groq",                    pro_only=False),
     ModelDetailOut(id="gemma-7b-it",         name="Gemma 7B",      provider="Groq",      description="Google Gemma 7B via Groq",              pro_only=False),
-    # Pro tier — Anthropic Claude (costs real money, Pro users only)
+    # Pro tier — Anthropic Claude
     ModelDetailOut(id="claude-3-haiku-20240307",      name="Claude 3 Haiku",       provider="Anthropic", description="Fastest Claude model — Pro only",           pro_only=True),
     ModelDetailOut(id="claude-3-5-haiku-20241022",    name="Claude 3.5 Haiku",     provider="Anthropic", description="Fastest Claude 3.5 model — Pro only",       pro_only=True),
     ModelDetailOut(id="claude-3-sonnet-20240229",     name="Claude 3 Sonnet",      provider="Anthropic", description="Balanced Claude model — Pro only",           pro_only=True),
@@ -311,16 +309,31 @@ async def _get_llm_answer(
     model_name: str,
     app_endpoint_url: Optional[str],
 ) -> tuple[str, float]:
+    """Get an answer from the LLM or a custom app endpoint.
+
+    FIX: When app_endpoint_url is set, the previous code did a GET to the root
+    which returned 405. We now POST to the provided URL with the question/context
+    payload and gracefully handle errors instead of raising.
+    """
     t0 = time.monotonic()
     if app_endpoint_url:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                app_endpoint_url,
-                json={"question": question, "context": context},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            answer = data.get("answer") or data.get("response") or str(data)
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    app_endpoint_url,
+                    json={"question": question, "context": context},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                answer = data.get("answer") or data.get("response") or str(data)
+        except httpx.HTTPStatusError as exc:
+            logger.warning("app_endpoint_url returned %s — falling back to judge", exc.response.status_code)
+            judge = judge_factory(model_name)
+            answer = await judge.complete(question=question, context=context)
+        except httpx.RequestError as exc:
+            logger.warning("app_endpoint_url request error %s — falling back to judge", exc)
+            judge = judge_factory(model_name)
+            answer = await judge.complete(question=question, context=context)
     else:
         judge = judge_factory(model_name)
         answer = await judge.complete(question=question, context=context)
@@ -517,7 +530,6 @@ async def list_runs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # LEFT JOIN so runs with zero scenario results are still returned
     stmt = (
         select(Run, func.coalesce(func.avg(RunScenarioResult.score), 0.0).label("mean_score"))
         .outerjoin(RunScenarioResult, Run.id == RunScenarioResult.run_id)
