@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from .api_keys import router as api_keys_router
 from .auth import (
@@ -73,21 +76,57 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# CORS
+# CORS — exact origins + Vercel preview wildcard
 # ---------------------------------------------------------------------------
 raw_origins = os.environ.get(
     "ALLOWED_ORIGINS",
     "http://localhost:3000,http://localhost:5173",
 )
-origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+exact_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Patterns that are always trusted in addition to exact_origins:
+# - Any Vercel preview deploy for this project
+# - Any Vercel production deploy for this project
+_TRUSTED_PATTERNS = [
+    re.compile(r"https://llm-test-lab.*\.vercel\.app$"),
+    re.compile(r"https://.*-seeshurajs-projects\.vercel\.app$"),
+]
+
+
+def _is_origin_allowed(origin: str) -> bool:
+    if origin in exact_origins:
+        return True
+    return any(p.match(origin) for p in _TRUSTED_PATTERNS)
+
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    """Handles CORS with wildcard Vercel preview support."""
+
+    CORS_HEADERS = {
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "*",
+        "Access-Control-Max-Age": "600",
+    }
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+        allowed = _is_origin_allowed(origin)
+
+        # Handle preflight
+        if request.method == "OPTIONS":
+            headers = {"Access-Control-Allow-Origin": origin if allowed else "", **self.CORS_HEADERS}
+            return Response(status_code=204, headers=headers)
+
+        response = await call_next(request)
+        if allowed and origin:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Vary"] = "Origin"
+        return response
+
+
+app.add_middleware(DynamicCORSMiddleware)
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -199,10 +238,10 @@ class ShareToggleRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auth routes
+# Auth routes  (prefixed /api/auth/* to match frontend calls)
 # ---------------------------------------------------------------------------
 
-@app.post("/auth/register", status_code=201)
+@app.post("/api/auth/register", status_code=201)
 async def register(body: UserCreate, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
@@ -218,7 +257,7 @@ async def register(body: UserCreate, db: AsyncSession = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
-@app.post("/auth/login")
+@app.post("/api/auth/login")
 async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == body.email))
     user = result.scalar_one_or_none()
@@ -228,7 +267,7 @@ async def login(body: UserLogin, db: AsyncSession = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
-@app.get("/auth/me")
+@app.get("/api/auth/me")
 async def me(current_user: User = Depends(get_current_user)):
     return {
         "id": current_user.id,
