@@ -10,12 +10,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Database URL resolution
 #
-# The backend runs on Render. Set ONE of these in Render > Environment:
+# Set ONE of these in Fly.io secrets:
 #
-#   DATABASE_URL      — full asyncpg URL  (Render auto-injects this if you
-#                        attach a Render Postgres; also accepted from any host)
-#   SUPABASE_DB_URL   — Supabase connection string, e.g.
-#                        postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres
+#   DATABASE_URL      — full asyncpg URL
+#   SUPABASE_DB_URL   — Supabase connection string
+#
+# IMPORTANT: Use the DIRECT connection (port 5432), NOT the Transaction Pooler
+# (port 6543). pgBouncer in transaction mode breaks asyncpg prepared statements
+# even with statement_cache_size=0 on the engine level.
+#
+# Supabase direct URL format:
+#   postgresql://postgres.[ref]:[password]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+# OR the older format:
+#   postgresql://postgres:[password]@db.[ref].supabase.co:5432/postgres
 #
 # Falls back to SQLite for local dev when neither is set.
 # ---------------------------------------------------------------------------
@@ -36,11 +43,22 @@ elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL
 
 is_postgres = "asyncpg" in DATABASE_URL
 
+# Detect if URL targets pgBouncer (port 6543) and warn — this WILL cause crashes
+if is_postgres and ":6543" in DATABASE_URL:
+    logger.warning(
+        "[db] WARNING: SUPABASE_DB_URL appears to use port 6543 (Transaction Pooler / pgBouncer). "
+        "This causes DuplicatePreparedStatementError with asyncpg. "
+        "Switch to port 5432 (direct connection) in your Fly.io secrets."
+    )
+
 connect_args: dict = {}
 if is_postgres:
+    # statement_cache_size=0 is required for pgBouncer pooler compatibility.
+    # Also set prepared_statement_cache_size=0 for asyncpg >= 0.28
     connect_args = {
         "ssl": "require",
-        "statement_cache_size": 0,  # required for Supabase pgBouncer pooler
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
     }
 
 if is_postgres:
@@ -52,6 +70,8 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     connect_args=connect_args,
+    # Disable SQLAlchemy-level statement cache as well
+    execution_options={"compiled_cache": None} if is_postgres else {},
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
