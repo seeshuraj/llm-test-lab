@@ -417,7 +417,7 @@ async def create_run(
         scenario_id = scenario.get("id", str(uuid.uuid4()))
         question = scenario.get("question", "")
         context = scenario.get("context", "")
-        variant_id = body.variant_name
+        expected = scenario.get("expected_answer", "")
 
         answer, latency_ms = await _get_llm_answer(
             question=question,
@@ -426,34 +426,38 @@ async def create_run(
             app_endpoint_url=body.app_endpoint_url,
         )
 
-        judge_result = await judge.judge(
+        score, reason = await judge.evaluate(
             question=question,
             context=context,
             answer=answer,
-            rubric=body.rubric or "",
+            expected=expected,
+            rubric=body.rubric,
         )
 
-        rag_scores_dict: Optional[dict] = None
-        if context:
-            rag = await compute_rag_metrics(
-                question=question,
-                context=context,
-                answer=answer,
-                judge=judge,
+        rag_scores = None
+        if context and answer:
+            try:
+                rag_scores = await compute_rag_metrics(
+                    question=question,
+                    answer=answer,
+                    context=context,
+                    expected=expected,
+                )
+            except Exception:
+                rag_scores = None
+
+        results.append(
+            RunScenarioResult(
+                run_id=run_id,
+                scenario_id=scenario_id,
+                variant_id=body.variant_name,
+                score=score,
+                reason=reason,
+                latency_ms=latency_ms,
+                judge_model=body.model_name,
+                rag_scores=rag_scores,
             )
-            rag_scores_dict = rag.to_dict()
-
-        result = RunScenarioResult(
-            run_id=run_id,
-            scenario_id=scenario_id,
-            variant_id=variant_id,
-            score=judge_result.score,
-            reason=judge_result.reason,
-            latency_ms=latency_ms,
-            judge_model=body.model_name,
-            rag_scores=rag_scores_dict,
         )
-        results.append(result)
 
     mean_score = sum(r.score for r in results) / len(results) if results else 0.0
 
@@ -598,6 +602,166 @@ async def get_run(
         results=results_out,
         dataset_version_id=run.dataset_version_id,
         is_public=run.is_public,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rerun
+# ---------------------------------------------------------------------------
+
+@app.post("/api/runs/{run_id}/rerun", response_model=RunOut, status_code=201)
+async def rerun_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Clone an existing run and re-execute it with the same configuration."""
+    result = await db.execute(
+        select(Run)
+        .options(selectinload(Run.results))
+        .where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    if original.model_name in ANTHROPIC_MODELS and not current_user.is_pro:
+        raise HTTPException(
+            status_code=403,
+            detail="Claude models are available on the Pro plan only.",
+            headers={"X-Upgrade-URL": "/billing/checkout"},
+        )
+
+    if not current_user.is_pro:
+        run_count_result = await db.execute(
+            select(func.count(Run.id)).where(Run.user_id == current_user.id)
+        )
+        if run_count_result.scalar_one() >= FREE_TRIAL_RUN_LIMIT:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Free trial limit of {FREE_TRIAL_RUN_LIMIT} runs reached. Upgrade to Pro.",
+                headers={"X-Upgrade-URL": "/billing/checkout"},
+            )
+
+    scenarios_yaml = original.scenarios_yaml
+    dataset_version_id = original.dataset_version_id
+
+    if dataset_version_id and not scenarios_yaml:
+        ds = await db.get(ScenarioDataset, dataset_version_id)
+        if ds:
+            scenarios_yaml = ds.yaml_content
+
+    if not scenarios_yaml:
+        raise HTTPException(
+            status_code=400,
+            detail="Original run has no scenarios YAML — cannot rerun.",
+        )
+
+    try:
+        scenarios_data = yaml.safe_load(scenarios_yaml)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML in original run: {exc}")
+
+    scenarios = scenarios_data.get("scenarios", [])
+    if not scenarios:
+        raise HTTPException(status_code=400, detail="No scenarios found in original run YAML")
+
+    new_run_id = str(uuid.uuid4())
+    judge = judge_factory(original.model_name)
+    results: list[RunScenarioResult] = []
+
+    for scenario in scenarios:
+        scenario_id = scenario.get("id", str(uuid.uuid4()))
+        question = scenario.get("question", "")
+        context = scenario.get("context", "")
+        expected = scenario.get("expected_answer", "")
+
+        answer, latency_ms = await _get_llm_answer(
+            question=question,
+            context=context,
+            model_name=original.model_name,
+            app_endpoint_url=original.app_endpoint_url,
+        )
+
+        score, reason = await judge.evaluate(
+            question=question,
+            context=context,
+            answer=answer,
+            expected=expected,
+            rubric=original.rubric,
+        )
+
+        rag_scores = None
+        if context and answer:
+            try:
+                rag_scores = await compute_rag_metrics(
+                    question=question,
+                    answer=answer,
+                    context=context,
+                    expected=expected,
+                )
+            except Exception:
+                rag_scores = None
+
+        results.append(
+            RunScenarioResult(
+                run_id=new_run_id,
+                scenario_id=scenario_id,
+                variant_id=original.variant_name,
+                score=score,
+                reason=reason,
+                latency_ms=latency_ms,
+                judge_model=original.model_name,
+                rag_scores=rag_scores,
+            )
+        )
+
+    mean_score = sum(r.score for r in results) / len(results) if results else 0.0
+
+    new_run = Run(
+        id=new_run_id,
+        project=original.project,
+        variant_name=original.variant_name,
+        model_name=original.model_name,
+        run_label=f"Rerun of {original.run_label or original.id[:8]}",
+        created_at=datetime.now(timezone.utc),
+        user_id=current_user.id,
+        scenarios_yaml=scenarios_yaml,
+        rubric=original.rubric,
+        app_endpoint_url=original.app_endpoint_url,
+        dataset_version_id=dataset_version_id,
+        is_public=False,
+    )
+    db.add(new_run)
+    for r in results:
+        db.add(r)
+    await db.commit()
+    await db.refresh(new_run)
+
+    results_out = [
+        ScenarioResultOut(
+            scenario_id=r.scenario_id,
+            variant_id=r.variant_id,
+            score=r.score,
+            reason=r.reason,
+            latency_ms=r.latency_ms,
+            judge_model=r.judge_model,
+            **(r.rag_scores or {}),
+        )
+        for r in results
+    ]
+
+    return RunOut(
+        id=new_run.id,
+        project=new_run.project,
+        variant_name=new_run.variant_name,
+        model_name=new_run.model_name,
+        run_label=new_run.run_label,
+        created_at=new_run.created_at,
+        mean_score=round(mean_score, 4),
+        results=results_out,
+        dataset_version_id=dataset_version_id,
+        is_public=False,
     )
 
 
