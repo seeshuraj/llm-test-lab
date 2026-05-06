@@ -29,7 +29,7 @@ function SkeletonCard() {
   return <div className="h-24 bg-gray-800 rounded-xl animate-pulse" />;
 }
 
-// ─── RAG metric mini-bar ─────────────────────────────────────────────────────
+// ─── RAG metric mini-bar ──────────────────────────────────────────────────────────────
 
 function RagMetricBar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -111,19 +111,21 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     </main>
   );
 
-  const scores = run.results.map((r) => r.score);
+  const results = run.results ?? [];
+
+  const scores = results.map((r) => r.score);
   const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
   const minScore = scores.length ? Math.min(...scores) : 0;
   const maxScore = scores.length ? Math.max(...scores) : 0;
-  const avgLatency = run.results.length
-    ? run.results.reduce((a, r) => a + r.latency_ms, 0) / run.results.length
+  const avgLatency = results.length
+    ? results.reduce((a, r) => a + r.latency_ms, 0) / results.length
     : 0;
 
   const passed = scores.filter((s) => s >= 0.8).length;
   const warned = scores.filter((s) => s >= 0.5 && s < 0.8).length;
   const failed = scores.filter((s) => s < 0.5).length;
 
-  const barData = run.results.map((r) => ({
+  const barData = results.map((r) => ({
     id: r.scenario_id,
     score: r.score,
     latency: r.latency_ms,
@@ -147,7 +149,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
   const distData = Object.entries(buckets).map(([range, count]) => ({ range, count }));
 
   // ── RAG aggregate stats (only shown if any result has RAG metrics)
-  const ragResults = run.results.filter(
+  const ragResults = results.filter(
     (r) => r.faithfulness !== undefined || r.context_precision !== undefined || r.answer_relevance !== undefined
   );
   const hasRagMetrics = ragResults.length > 0;
@@ -312,7 +314,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
         </ResponsiveContainer>
       </div>
 
-      {/* Results table — now includes RAG metric column */}
+      {/* Results table */}
       <h2 className="text-sm font-semibold text-gray-300 mb-3">Scenario Details</h2>
       <div className="overflow-x-auto rounded-xl border border-gray-700">
         <table className="w-full text-sm text-left">
@@ -327,7 +329,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
             </tr>
           </thead>
           <tbody>
-            {run.results.map((r, i) => (
+            {results.map((r, i) => (
               <tr key={r.scenario_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
                 <td className="px-4 py-3 font-mono text-xs text-gray-300">{r.scenario_id}</td>
                 <td className="px-4 py-3">
