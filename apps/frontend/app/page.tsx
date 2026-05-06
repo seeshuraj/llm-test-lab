@@ -226,7 +226,7 @@ export default function HomePage() {
     setSubmitting(true);
     setFormError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/run-local`, {
+      const res = await fetch(`${API_BASE}/api/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
@@ -373,6 +373,7 @@ export default function HomePage() {
                   <select
                     value={modelName}
                     onChange={(e) => setModelName(e.target.value)}
+                    aria-label="Select judge model"
                     className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500 appearance-none pr-8"
                   >
                     {availableModels.map((m) => {
