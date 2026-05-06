@@ -24,7 +24,7 @@ export interface Run {
   run_label?: string;
   created_at?: string;
   avg_score: number;
-  results: ScenarioResult[];
+  results: ScenarioResult[] | null;
 }
 
 /** Enriched model info returned by the backend. */
@@ -37,9 +37,10 @@ export interface ModelDetail {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Normalize a raw run object from the backend.
- *  The backend may return `id` instead of `run_id` — coerce to always have run_id. */
+ *  The backend may return `id` instead of `run_id` — coerce to always have run_id.
+ *  Also coerce null results to empty array. */
 function normalizeRun(r: any): Run {
-  return { ...r, run_id: r.run_id ?? r.id };
+  return { ...r, run_id: r.run_id ?? r.id, results: r.results ?? [] };
 }
 
 // ─── Runs ────────────────────────────────────────────────────────────────────
@@ -150,7 +151,7 @@ function inferModelDetail(id: string): ModelDetail {
 
 export function exportRunCSV(run: Run): void {
   const header = ["scenario_id", "score", "latency_ms", "judge_model", "faithfulness", "context_precision", "answer_relevance", "reason"];
-  const rows = run.results.map((r) => [
+  const rows = (run.results ?? []).map((r) => [
     r.scenario_id,
     r.score,
     r.latency_ms,
