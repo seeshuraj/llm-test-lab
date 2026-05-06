@@ -53,10 +53,12 @@ export function authHeaders(): Record<string, string> {
 }
 
 export async function login(email: string, password: string): Promise<string> {
+  // FIX: was sending application/x-www-form-urlencoded with `username`.
+  // Backend expects JSON with `email` field (UserLogin Pydantic model).
   const res = await fetch(`${API_BASE}/api/auth/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ username: email, password }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -78,4 +80,16 @@ export async function register(email: string, password: string): Promise<string>
   }
   const data = await res.json();
   return data.access_token;
+}
+
+/**
+ * Fetch current user profile — used to verify token validity on page load.
+ * FIX: endpoint is /api/auth/me (with /api prefix).
+ */
+export async function fetchMe(): Promise<{ id: string; email: string; is_pro: boolean }> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("UNAUTHORIZED");
+  return res.json();
 }

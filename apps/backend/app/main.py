@@ -277,7 +277,7 @@ async def me(current_user: User = Depends(get_current_user)):
 
 
 # ---------------------------------------------------------------------------
-# Models catalogue
+# Models catalogue  — FIX: was /models (missing /api prefix)
 # ---------------------------------------------------------------------------
 
 _MODELS: list[ModelDetailOut] = [
@@ -295,7 +295,7 @@ _MODELS: list[ModelDetailOut] = [
 ]
 
 
-@app.get("/models", response_model=list[ModelDetailOut])
+@app.get("/api/models", response_model=list[ModelDetailOut])
 async def list_models():
     return _MODELS
 
