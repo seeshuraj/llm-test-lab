@@ -44,13 +44,16 @@ export default function TrendsPage() {
     chartDataByProject[project] = runs
       .filter((r) => r.project === project)
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
-      .map((r) => ({
-        time: getRunLabel(r),
-        score: r.results.length > 0
-          ? parseFloat((r.results.reduce((s, x) => s + x.score, 0) / r.results.length).toFixed(4))
-          : 0,
-        run_id: r.run_id.slice(0, 8),
-      }));
+      .map((r) => {
+        const results = r.results ?? [];
+        return {
+          time: getRunLabel(r),
+          score: results.length > 0
+            ? parseFloat((results.reduce((s, x) => s + x.score, 0) / results.length).toFixed(4))
+            : 0,
+          run_id: r.run_id.slice(0, 8),
+        };
+      });
   }
 
   const allTimes = Array.from(
