@@ -282,17 +282,20 @@ export default function HomePage() {
   };
 
   const totalRuns = runs.length;
-  const allScores = runs.flatMap((r) => (r.results ?? []).map((x) => x.score));
+  const allScores = runs.flatMap((r) => (r.results ?? []).map((x) => x.score).filter((s): s is number => s != null));
   const overallAvg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null;
   const passRate = allScores.length ? (allScores.filter((s) => s >= 0.8).length / allScores.length) * 100 : null;
   const projects = Array.from(new Set(runs.map((r) => r.project)));
+
+  // FIX: filter out runs with null/undefined avg_score so toFixed never receives null
   const sparkData = [...runs]
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .slice(-10)
     .map((r) => ({
       t: r.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
-      avg: r.avg_score,
-    }));
+      avg: r.avg_score ?? null,
+    }))
+    .filter((d): d is { t: string; avg: number } => d.avg != null);
 
   const selectedModel = availableModels.find((m) => m.id === modelName);
   const ANTHROPIC_PROVIDERS = ["anthropic"];
@@ -302,7 +305,8 @@ export default function HomePage() {
     return {
       ...r,
       run_id: r.run_id ?? r.id,
-      avg_score: r.avg_score ?? r.mean_score ?? 0,
+      // FIX: keep null rather than coercing to 0 — consumers must guard with != null
+      avg_score: r.avg_score ?? r.mean_score ?? null,
       results: r.results ?? [],
     };
   }
@@ -362,10 +366,11 @@ export default function HomePage() {
             <LineChart data={sparkData} margin={{ top: 5, right: 20, left: -30, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="t" tick={{ fontSize: 10, fill: "#6b7280" }} />
-              <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => v.toFixed(1)} />
+              {/* FIX: guard v against null before calling toFixed */}
+              <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => (v != null ? Number(v).toFixed(1) : "")} />
               <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
-                formatter={(v: any) => [Number(v).toFixed(3), "Avg Score"]} />
-              <Line type="monotone" dataKey="avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: "#3b82f6" }} />
+                formatter={(v: any) => [v != null ? Number(v).toFixed(3) : "—", "Avg Score"]} />
+              <Line type="monotone" dataKey="avg" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3, fill: "#3b82f6" }} connectNulls={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -554,7 +559,8 @@ export default function HomePage() {
         <div className="space-y-4">
           {runs.map((run) => {
             const results = run.results ?? [];
-            const scores = results.map((x) => x.score);
+            // FIX: filter null/undefined scores before computing avg
+            const scores = results.map((x) => x.score).filter((s): s is number => s != null);
             const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
             const pass = scores.filter((s) => s >= 0.8).length;
             return (
@@ -637,10 +643,11 @@ export default function HomePage() {
                     </div>
                     {results.map((res, i) => (
                       <div key={i} className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: scoreColor(res.score) }} />
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: res.score != null ? scoreColor(res.score) : "#6b7280" }} />
                         <span className="text-xs text-gray-400 font-mono flex-1 truncate">{res.scenario_id}</span>
-                        <span className="text-xs font-bold shrink-0" style={{ color: scoreColor(res.score) }}>
-                          {res.score.toFixed(2)}
+                        {/* FIX: guard res.score against null before toFixed */}
+                        <span className="text-xs font-bold shrink-0" style={{ color: res.score != null ? scoreColor(res.score) : "#6b7280" }}>
+                          {res.score != null ? res.score.toFixed(2) : "—"}
                         </span>
                       </div>
                     ))}
