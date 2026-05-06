@@ -110,8 +110,8 @@ export default function HomePage() {
   useEffect(() => {
     setSavedScenarios(listSavedScenarios());
     fetchModels().then(setAvailableModels);
-    // Fetch plan status to gate Pro models
-    fetch(`${API_BASE}/auth/me`, { headers: authHeaders() })
+    // Fetch plan status to gate Pro models — corrected path to /api/auth/me
+    fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() })
       .then((r) => r.json())
       .then((d) => setIsPro(!!d.is_pro))
       .catch(() => {});
@@ -261,7 +261,8 @@ export default function HomePage() {
   };
 
   const totalRuns = runs.length;
-  const allScores = runs.flatMap((r) => r.results.map((x) => x.score));
+  // Guard: r.results may be undefined for pending/errored runs
+  const allScores = runs.flatMap((r) => (r.results ?? []).map((x) => x.score));
   const overallAvg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null;
   const passRate = allScores.length ? (allScores.filter((s) => s >= 0.8).length / allScores.length) * 100 : null;
   const projects = Array.from(new Set(runs.map((r) => r.project)));
@@ -432,7 +433,7 @@ export default function HomePage() {
                       Choose file
                       <input type="file" accept=".yaml,.yml" onChange={handleFileUpload} className="hidden" />
                     </label>
-                    {fileName && <span className="text-xs text-gray-400">{fileName}</span>}
+                    {fileName && <span className="text-sm text-gray-400">{fileName}</span>}
                   </div>
                 )}
               </div>
@@ -443,11 +444,11 @@ export default function HomePage() {
                   <label className="block text-sm text-gray-400 mb-1">Load from library</label>
                   <div className="flex flex-wrap gap-2">
                     {savedScenarios.map((s) => (
-                      <div key={s.name} className="flex items-center gap-1">
+                      <div key={s.name} className="flex items-center gap-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1">
                         <button type="button" onClick={() => handleLoadFromLibrary(s.yaml)}
-                          className="bg-gray-700 hover:bg-gray-600 text-white text-xs px-2 py-1 rounded">{s.name}</button>
+                          className="text-xs text-blue-400 hover:text-blue-300">{s.name}</button>
                         <button type="button" onClick={() => handleDeleteFromLibrary(s.name)}
-                          className="text-gray-500 hover:text-red-400 text-xs px-1">✕</button>
+                          className="text-xs text-gray-600 hover:text-red-400 ml-1">×</button>
                       </div>
                     ))}
                   </div>
@@ -455,25 +456,30 @@ export default function HomePage() {
               )}
 
               {/* Save to library */}
-              <div className="flex items-center gap-2">
-                {showSaveLib ? (
-                  <>
-                    <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
-                      placeholder="Scenario set name" className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-blue-500" />
-                    <button type="button" onClick={handleSaveToLibrary} className="bg-green-700 hover:bg-green-600 text-white text-xs px-3 py-1.5 rounded-lg">Save</button>
-                    <button type="button" onClick={() => setShowSaveLib(false)} className="text-gray-500 text-xs">Cancel</button>
-                  </>
-                ) : (
-                  <button type="button" onClick={() => setShowSaveLib(true)}
-                    className="text-gray-400 hover:text-white text-xs underline">+ Save current scenarios to library</button>
-                )}
-              </div>
+              {scenariosYaml.trim() && (
+                <div>
+                  {showSaveLib ? (
+                    <div className="flex gap-2">
+                      <input type="text" value={saveLibName} onChange={(e) => setSaveLibName(e.target.value)}
+                        placeholder="Scenario set name"
+                        className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-blue-500" />
+                      <button type="button" onClick={handleSaveToLibrary}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm">Save</button>
+                      <button type="button" onClick={() => setShowSaveLib(false)}
+                        className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-sm">Cancel</button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setShowSaveLib(true)}
+                      className="text-xs text-gray-500 hover:text-gray-300">+ Save to library</button>
+                  )}
+                </div>
+              )}
 
-              {/* Custom rubric */}
+              {/* Rubric */}
               <div>
                 <button type="button" onClick={() => { setShowRubric(!showRubric); if (!rubric) setRubric(DEFAULT_RUBRIC_TEXT); }}
-                  className="text-sm text-blue-400 hover:text-blue-300">
-                  {showRubric ? "▼" : "▶"} Custom rubric <span className="text-gray-500">(optional)</span>
+                  className="text-xs text-gray-500 hover:text-gray-300">
+                  {showRubric ? "▾ Hide custom rubric" : "▸ Add custom rubric (optional)"}
                 </button>
                 {showRubric && (
                   <textarea value={rubric} onChange={(e) => setRubric(e.target.value)}
@@ -481,21 +487,15 @@ export default function HomePage() {
                 )}
               </div>
 
-              {formError && (
-                <div className="bg-red-900/30 border border-red-700 rounded-lg p-3">
-                  <p className="text-red-400 text-sm">{formError}</p>
-                  {(formError.includes("Pro") || formError.includes("upgrade") || formError.includes("limit")) && (
-                    <Link href="/settings" className="text-xs text-amber-400 underline mt-1 block">Go to Settings → Upgrade to Pro</Link>
-                  )}
-                </div>
-              )}
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowForm(false)}
-                  className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm">Cancel</button>
+              {formError && <p className="text-red-400 text-sm">{formError}</p>}
+
+              <div className="flex gap-3 pt-2">
                 <button type="submit" disabled={submitting}
-                  className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-6 py-2 rounded-lg text-sm font-medium">
-                  {submitting ? "Running…" : "Run evaluation"}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2.5 rounded-lg font-medium text-sm transition-colors">
+                  {submitting ? "Running…" : "Run Evaluation"}
                 </button>
+                <button type="button" onClick={() => { setShowForm(false); setFormError(null); }}
+                  className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2.5 rounded-lg text-sm transition-colors">Cancel</button>
               </div>
             </form>
           </div>
@@ -503,88 +503,118 @@ export default function HomePage() {
       )}
 
       {loading && (
-        <div className="space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-16 bg-gray-800 rounded-xl animate-pulse" />
-          ))}
+        <div className="flex items-center justify-center py-20">
+          <div className="text-gray-500 text-sm">Loading runs…</div>
         </div>
       )}
 
-      {error && <p className="text-red-400 mb-4">{error}</p>}
+      {!loading && error && (
+        <div className="bg-red-900/30 border border-red-700 rounded-xl p-4 mb-6">
+          <p className="text-red-400 text-sm">{error}</p>
+        </div>
+      )}
 
-      {!loading && runs.length === 0 && (
-        <div className="text-center py-24 text-gray-500">
-          <p className="text-4xl mb-4">🧪</p>
-          <p className="text-lg font-semibold text-gray-300">No runs yet</p>
-          <p className="text-sm mt-1">Click <span className="text-blue-400">+ New Run</span> to kick off your first evaluation.</p>
+      {!loading && !error && runs.length === 0 && (
+        <div className="text-center py-20">
+          <p className="text-gray-500 text-sm mb-4">No evaluation runs yet.</p>
+          <button onClick={() => { setShowForm(true); setScenariosYaml(SAMPLE_YAML); }}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors">
+            Start your first run
+          </button>
         </div>
       )}
 
       {!loading && runs.length > 0 && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {runs.map((run) => {
-            const avg = run.avg_score;
-            const isEditing = editingLabel === run.run_id;
+            const results = run.results ?? [];
+            const scores = results.map((x) => x.score);
+            const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
+            const pass = scores.filter((s) => s >= 0.8).length;
             return (
-              <div key={run.run_id} className="bg-gray-900 border border-gray-700 rounded-xl px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    {isEditing ? (
-                      <div className="flex items-center gap-2">
-                        <input autoFocus type="text" value={editLabelValue}
-                          onChange={(e) => setEditLabelValue(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") handleSaveLabel(run.run_id); if (e.key === "Escape") setEditingLabel(null); }}
-                          className="bg-gray-800 border border-blue-500 rounded px-2 py-0.5 text-white text-sm w-48 focus:outline-none" />
-                        <button onClick={() => handleSaveLabel(run.run_id)} disabled={!!savingLabel}
-                          className="text-xs text-green-400 hover:text-green-300">{savingLabel === run.run_id ? "Saving…" : "Save"}</button>
-                        <button onClick={() => setEditingLabel(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="font-semibold text-white truncate">
-                          {run.run_label || <span className="font-mono text-blue-300 text-sm">{run.run_id.slice(0, 8)}…</span>}
-                        </span>
-                        <button onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
-                          className="text-gray-600 hover:text-gray-300 text-xs">✏</button>
-                      </>
+              <div key={run.run_id} className="bg-gray-900 border border-gray-700 rounded-xl p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {editingLabel === run.run_id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={editLabelValue}
+                            onChange={(e) => setEditLabelValue(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleSaveLabel(run.run_id); if (e.key === "Escape") setEditingLabel(null); }}
+                            className="bg-gray-800 border border-blue-500 rounded px-2 py-0.5 text-white text-sm focus:outline-none w-48"
+                            autoFocus
+                          />
+                          <button onClick={() => handleSaveLabel(run.run_id)} disabled={savingLabel === run.run_id}
+                            className="text-xs text-blue-400 hover:text-blue-300 disabled:opacity-50">
+                            {savingLabel === run.run_id ? "Saving…" : "Save"}
+                          </button>
+                          <button onClick={() => setEditingLabel(null)} className="text-xs text-gray-500 hover:text-gray-300">Cancel</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <h3 className="font-semibold text-white text-sm">
+                            {run.run_label || run.project}
+                          </h3>
+                          <button
+                            onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
+                            className="text-gray-600 hover:text-gray-400 text-xs"
+                            title="Edit label"
+                          >✎</button>
+                        </div>
+                      )}
+                      <span className="text-xs text-gray-600">{run.variant_name}</span>
+                      {run.model_name && (
+                        <span className="text-xs bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-gray-400 font-mono">{run.model_name}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      {run.created_at ? new Date(run.created_at).toLocaleString() : run.run_id}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {avg !== null && (
+                      <span className="text-2xl font-bold" style={{ color: scoreColor(avg) }}>
+                        {avg.toFixed(2)}
+                      </span>
                     )}
-                  </div>
-                  <p className="text-xs text-gray-500">
-                    {run.project} · {run.variant_name} ·
-                    <span className="ml-1 mr-1">{run.model_name}</span>
-                    {(() => {
-                      const m = availableModels.find((x) => x.id === run.model_name);
-                      return m ? <ProviderBadge provider={m.provider} /> : null;
-                    })()}
-                    {run.created_at && <> · {new Date(run.created_at).toLocaleString()}</>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <p className="text-xs text-gray-500">Avg score</p>
-                    <p className="text-xl font-bold" style={{ color: scoreColor(avg) }}>{avg.toFixed(2)}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs text-gray-500">Scenarios</p>
-                    <p className="text-xl font-bold text-white">{run.results.length}</p>
+                    <div className="flex flex-col gap-1">
+                      <button onClick={() => handleCopyShareLink(run.run_id)}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors">
+                        {copied === run.run_id ? "✓ Copied" : "Share"}
+                      </button>
+                      <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 px-2 py-1 rounded transition-colors">
+                        {rerunning === run.run_id ? "…" : "Re-run"}
+                      </button>
+                      <button onClick={() => handleDelete(run.run_id)}
+                        className="text-xs bg-gray-700 hover:bg-red-900 text-gray-400 hover:text-red-300 px-2 py-1 rounded transition-colors">
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <Link href={`/runs/${run.run_id}`}
-                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">View</Link>
-                  <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
-                    className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
-                    {rerunning === run.run_id ? "…" : "Re-run"}
-                  </button>
-                  <button onClick={() => handleCopyShareLink(run.run_id)}
-                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
-                    {copied === run.run_id ? "✓ Copied" : "Share"}
-                  </button>
-                  <button onClick={() => exportRunCSV(run)}
-                    className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">CSV</button>
-                  <button onClick={() => handleDelete(run.run_id)}
-                    className="text-gray-600 hover:text-red-400 text-xs px-2 py-1.5 transition-colors">✕</button>
-                </div>
+
+                {results.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center gap-3 text-xs text-gray-500 mb-2">
+                      <span>{results.length} scenario{results.length !== 1 ? "s" : ""}</span>
+                      <span>·</span>
+                      <span>{pass}/{results.length} passed</span>
+                    </div>
+                    {results.map((res, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: scoreColor(res.score) }} />
+                        <span className="text-xs text-gray-400 font-mono flex-1 truncate">{res.scenario_id}</span>
+                        <span className="text-xs font-bold shrink-0" style={{ color: scoreColor(res.score) }}>
+                          {res.score.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
