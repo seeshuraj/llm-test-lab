@@ -37,17 +37,19 @@ export default function SharePage() {
     </main>
   );
 
-  const scores = run.results.map((r) => r.score);
+  const results = run.results ?? [];
+
+  const scores = results.map((r) => r.score);
   const minScore = scores.length ? Math.min(...scores) : 0;
   const maxScore = scores.length ? Math.max(...scores) : 0;
-  const avgLatency = run.results.length
-    ? run.results.reduce((a, r) => a + r.latency_ms, 0) / run.results.length
+  const avgLatency = results.length
+    ? results.reduce((a, r) => a + r.latency_ms, 0) / results.length
     : 0;
   const passCount = scores.filter((s) => s >= 0.8).length;
   const warnCount = scores.filter((s) => s >= 0.5 && s < 0.8).length;
   const failCount = scores.filter((s) => s < 0.5).length;
 
-  const barData = run.results.map((r) => ({
+  const barData = results.map((r) => ({
     name: r.scenario_id,
     score: r.score,
   }));
@@ -101,7 +103,7 @@ export default function SharePage() {
         </div>
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-4 text-center">
           <p className="text-xs text-gray-500 mb-1">Scenarios</p>
-          <p className="text-3xl font-bold text-white">{run.results.length}</p>
+          <p className="text-3xl font-bold text-white">{results.length}</p>
         </div>
       </div>
 
@@ -118,10 +120,7 @@ export default function SharePage() {
               formatter={(v: any) => [Number(v).toFixed(3), "Score"]}
             />
             <ReferenceLine y={0.8} stroke="#ef4444" strokeDasharray="4 4" label={{ value: "threshold", fill: "#ef4444", fontSize: 10 }} />
-            <Bar dataKey="score" radius={[4, 4, 0, 0]}
-              fill="#3b82f6"
-              label={false}
-            />
+            <Bar dataKey="score" radius={[4, 4, 0, 0]} fill="#3b82f6" label={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -138,7 +137,7 @@ export default function SharePage() {
             </tr>
           </thead>
           <tbody>
-            {run.results.map((r, i) => (
+            {results.map((r, i) => (
               <tr key={r.scenario_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
                 <td className="px-4 py-3 font-mono text-xs text-gray-300">{r.scenario_id}</td>
                 <td className="px-4 py-3">
