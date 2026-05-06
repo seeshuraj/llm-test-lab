@@ -86,13 +86,18 @@ export async function deleteRun(runId: string): Promise<void> {
   if (!res.ok) throw new Error("Delete failed");
 }
 
-export async function rerunRun(runId: string): Promise<void> {
+/**
+ * Re-run an existing run. Returns the newly created Run so the caller
+ * can navigate directly to its detail page (graphs + explanations).
+ */
+export async function rerunRun(runId: string): Promise<Run> {
   if (!runId) throw new Error("Invalid run ID");
   const res = await fetch(`${API_BASE}/api/runs/${runId}/rerun`, {
     method: "POST",
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Re-run failed");
+  return normalizeRun(await res.json());
 }
 
 export async function updateRunLabel(runId: string, label: string): Promise<Run> {

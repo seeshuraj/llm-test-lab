@@ -197,8 +197,10 @@ export default function HomePage() {
   const handleRerun = async (runId: string) => {
     setRerunning(runId);
     try {
-      await rerunRun(runId);
-      loadRuns();
+      const newRun = await rerunRun(runId);
+      // Navigate directly to the new run's detail page so the user
+      // immediately sees graphs, scores, and per-scenario explanations.
+      router.push(`/runs/${newRun.run_id}`);
     } catch (e) {
       alert(`Re-run failed: ${e}`);
     } finally {
@@ -246,9 +248,11 @@ export default function HomePage() {
         }
         throw new Error(err.detail || "Run failed");
       }
+      const newRun = normalizeRun(await res.json());
       setShowForm(false);
       setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel("");
-      loadRuns();
+      // Navigate to the new run's detail page immediately
+      router.push(`/runs/${newRun.run_id}`);
     } catch (e) {
       setFormError(String(e));
     } finally {
@@ -278,6 +282,16 @@ export default function HomePage() {
   const selectedModel = availableModels.find((m) => m.id === modelName);
   const ANTHROPIC_PROVIDERS = ["anthropic"];
   const isProModel = (m: ModelDetail) => ANTHROPIC_PROVIDERS.includes(m.provider.toLowerCase());
+
+  // normalizeRun is needed for handleSubmit above
+  function normalizeRun(r: any): Run {
+    return {
+      ...r,
+      run_id: r.run_id ?? r.id,
+      avg_score: r.avg_score ?? r.mean_score ?? 0,
+      results: r.results ?? [],
+    };
+  }
 
   return (
     <main className="max-w-6xl mx-auto p-8">
@@ -552,9 +566,12 @@ export default function HomePage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <h3 className="font-semibold text-white text-sm">
+                          <Link
+                            href={`/runs/${run.run_id}`}
+                            className="font-semibold text-white text-sm hover:text-blue-300 transition-colors"
+                          >
                             {run.run_label || run.project}
-                          </h3>
+                          </Link>
                           <button
                             onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
                             className="text-gray-600 hover:text-gray-400 text-xs"
