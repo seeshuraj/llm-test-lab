@@ -309,12 +309,7 @@ async def _get_llm_answer(
     model_name: str,
     app_endpoint_url: Optional[str],
 ) -> tuple[str, float]:
-    """Get an answer from the LLM or a custom app endpoint.
-
-    FIX: When app_endpoint_url is set, the previous code did a GET to the root
-    which returned 405. We now POST to the provided URL with the question/context
-    payload and gracefully handle errors instead of raising.
-    """
+    """Get an answer from the LLM or a custom app endpoint."""
     t0 = time.monotonic()
     if app_endpoint_url:
         try:
@@ -426,13 +421,13 @@ async def create_run(
             app_endpoint_url=body.app_endpoint_url,
         )
 
-        score, reason = await judge.evaluate(
+        judge_result = await judge.judge(
             question=question,
             context=context,
             answer=answer,
-            expected=expected,
-            rubric=body.rubric,
+            rubric=body.rubric or "",
         )
+        score, reason = judge_result.score, judge_result.reason
 
         rag_scores = None
         if context and answer:
@@ -683,13 +678,13 @@ async def rerun_run(
             app_endpoint_url=original.app_endpoint_url,
         )
 
-        score, reason = await judge.evaluate(
+        judge_result = await judge.judge(
             question=question,
             context=context,
             answer=answer,
-            expected=expected,
-            rubric=original.rubric,
+            rubric=original.rubric or "",
         )
+        score, reason = judge_result.score, judge_result.reason
 
         rag_scores = None
         if context and answer:
