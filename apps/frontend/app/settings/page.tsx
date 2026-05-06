@@ -9,7 +9,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 interface BillingStatus {
   is_pro: boolean;
   email: string;
-  stripe_customer_id: string | null;
+  has_payment_method: boolean;
+  stripe_enabled: boolean;
 }
 
 // Inner component that uses useSearchParams — must be inside <Suspense>
@@ -51,9 +52,8 @@ function SettingsContent() {
       });
       // Stripe not yet configured — show friendly message instead of crashing
       if (res.status === 503) {
-        setError(
-          "Billing is not yet live. To upgrade manually, email us at hello@llmtestlab.com or check back soon."
-        );
+        const err = await res.json();
+        setError(err.detail || "Billing is not yet live. Check back soon or contact us.");
         return;
       }
       if (res.status === 400) {
@@ -73,6 +73,14 @@ function SettingsContent() {
       setCheckoutLoading(false);
     }
   }
+
+  // Derive upgrade button label based on Stripe availability
+  const stripeEnabled = billing?.stripe_enabled ?? false;
+  const upgradeLabel = checkoutLoading
+    ? "Redirecting…"
+    : stripeEnabled
+    ? "Upgrade to Pro →"
+    : "Join the Pro Waitlist →";
 
   return (
     <main className="max-w-2xl mx-auto p-8">
@@ -145,9 +153,13 @@ function SettingsContent() {
                 disabled={checkoutLoading}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg text-sm transition-colors"
               >
-                {checkoutLoading ? "Redirecting…" : "Upgrade to Pro →"}
+                {upgradeLabel}
               </button>
-              <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout via Stripe · Cancel anytime.</p>
+              <p className="text-xs text-gray-500 mt-2 text-center">
+                {stripeEnabled
+                  ? "Secure checkout via Stripe · Cancel anytime."
+                  : "Paid billing coming soon · Early access available on request."}
+              </p>
             </div>
           </div>
         )}
