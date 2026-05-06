@@ -517,9 +517,10 @@ async def list_runs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # LEFT JOIN so runs with zero scenario results are still returned
     stmt = (
-        select(Run, func.avg(RunScenarioResult.score).label("mean_score"))
-        .join(RunScenarioResult, Run.id == RunScenarioResult.run_id)
+        select(Run, func.coalesce(func.avg(RunScenarioResult.score), 0.0).label("mean_score"))
+        .outerjoin(RunScenarioResult, Run.id == RunScenarioResult.run_id)
         .where(Run.user_id == current_user.id)
         .group_by(Run.id)
         .order_by(desc(Run.created_at))
