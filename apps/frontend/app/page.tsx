@@ -43,7 +43,7 @@ function resolveStatColor(color: string): string {
   return color.startsWith("#") ? color : "#ffffff";
 }
 
-// ─── Provider badge ──────────────────────────────────────────────────────────────
+// ─── Provider badge ────────────────────────────────────────────
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
   groq:      { label: "Groq",      color: "#f55036" },
@@ -167,7 +167,6 @@ export default function HomePage() {
   };
 
   const handleCopyShareLink = async (runId: string, isPublic: boolean) => {
-    // If not yet public, toggle it first
     if (!isPublic) {
       try {
         await fetch(`${API_BASE}/api/runs/${runId}/share`, {
@@ -175,12 +174,11 @@ export default function HomePage() {
           headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({ is_public: true }),
         });
-        // Update local state
         setRuns((prev) =>
           prev.map((r) => (r.run_id === runId ? { ...r, is_public: true } : r))
         );
       } catch {
-        // Non-fatal — still copy the link
+        // Non-fatal
       }
     }
     const url = `${window.location.origin}/share/${runId}`;
@@ -213,7 +211,6 @@ export default function HomePage() {
     setRerunning(runId);
     try {
       const newRun = await rerunRun(runId);
-      // Safely resolve run_id — rerunRun normalizes id→run_id but guard anyway
       const targetId = newRun.run_id ?? (newRun as any).id;
       if (!targetId) throw new Error("No run ID returned from re-run");
       router.push(`/runs/${targetId}`);
@@ -287,12 +284,11 @@ export default function HomePage() {
   const passRate = allScores.length ? (allScores.filter((s) => s >= 0.8).length / allScores.length) * 100 : null;
   const projects = Array.from(new Set(runs.map((r) => r.project)));
 
-  // FIX: filter out runs with null/undefined avg_score so toFixed never receives null
   const sparkData = [...runs]
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .slice(-10)
     .map((r) => ({
-      t: r.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
+      t: run.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
       avg: r.avg_score ?? null,
     }))
     .filter((d): d is { t: string; avg: number } => d.avg != null);
@@ -305,7 +301,6 @@ export default function HomePage() {
     return {
       ...r,
       run_id: r.run_id ?? r.id,
-      // FIX: keep null rather than coercing to 0 — consumers must guard with != null
       avg_score: r.avg_score ?? r.mean_score ?? null,
       results: r.results ?? [],
     };
@@ -366,7 +361,6 @@ export default function HomePage() {
             <LineChart data={sparkData} margin={{ top: 5, right: 20, left: -30, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="t" tick={{ fontSize: 10, fill: "#6b7280" }} />
-              {/* FIX: guard v against null before calling toFixed */}
               <YAxis domain={[0, 1]} tick={{ fontSize: 10, fill: "#6b7280" }} tickFormatter={(v) => (v != null ? Number(v).toFixed(1) : "")} />
               <Tooltip contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
                 formatter={(v: any) => [v != null ? Number(v).toFixed(3) : "—", "Avg Score"]} />
@@ -559,7 +553,6 @@ export default function HomePage() {
         <div className="space-y-4">
           {runs.map((run) => {
             const results = run.results ?? [];
-            // FIX: filter null/undefined scores before computing avg
             const scores = results.map((x) => x.score).filter((s): s is number => s != null);
             const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
             const pass = scores.filter((s) => s >= 0.8).length;
@@ -609,13 +602,21 @@ export default function HomePage() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-3 shrink-0">
                     {avg !== null && (
                       <span className="text-2xl font-bold" style={{ color: scoreColor(avg) }}>
                         {avg.toFixed(2)}
                       </span>
                     )}
+                    {/* Action buttons */}
                     <div className="flex flex-col gap-1">
+                      {/* VIEW — primary action, highlighted blue */}
+                      <Link
+                        href={`/runs/${run.run_id}`}
+                        className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition-colors text-center font-medium"
+                      >
+                        🔍 View
+                      </Link>
                       <button
                         onClick={() => handleCopyShareLink(run.run_id, (run as any).is_public ?? false)}
                         className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors"
@@ -645,7 +646,6 @@ export default function HomePage() {
                       <div key={i} className="flex items-center gap-3 bg-gray-800/50 rounded-lg px-3 py-2">
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: res.score != null ? scoreColor(res.score) : "#6b7280" }} />
                         <span className="text-xs text-gray-400 font-mono flex-1 truncate">{res.scenario_id}</span>
-                        {/* FIX: guard res.score against null before toFixed */}
                         <span className="text-xs font-bold shrink-0" style={{ color: res.score != null ? scoreColor(res.score) : "#6b7280" }}>
                           {res.score != null ? res.score.toFixed(2) : "—"}
                         </span>
