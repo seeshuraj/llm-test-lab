@@ -37,10 +37,17 @@ export interface ModelDetail {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Normalize a raw run object from the backend.
- *  The backend may return `id` instead of `run_id` — coerce to always have run_id.
+ *  Backend returns { id, mean_score, ... } — frontend expects { run_id, avg_score, ... }.
  *  Also coerce null results to empty array. */
 function normalizeRun(r: any): Run {
-  return { ...r, run_id: r.run_id ?? r.id, results: r.results ?? [] };
+  return {
+    ...r,
+    // Backend uses `id`; frontend uses `run_id`
+    run_id: r.run_id ?? r.id,
+    // Backend uses `mean_score`; frontend uses `avg_score`
+    avg_score: r.avg_score ?? r.mean_score ?? 0,
+    results: r.results ?? [],
+  };
 }
 
 // ─── Runs ────────────────────────────────────────────────────────────────────
@@ -116,7 +123,13 @@ export async function fetchModels(): Promise<ModelDetail[]> {
     if (Array.isArray(data) && data.length > 0 && typeof data[0] === "string") {
       return (data as string[]).map(inferModelDetail);
     }
-    return data as ModelDetail[];
+
+    // Backend returns { id, name, provider, ... } — map to ModelDetail shape
+    return (data as any[]).map((m) => ({
+      id: m.id,
+      provider: (m.provider ?? "unknown").toLowerCase() as ModelDetail["provider"],
+      display_name: m.name ?? m.display_name,
+    }));
   } catch {
     // Hardcoded fallback so the UI is never empty
     return [
