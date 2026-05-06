@@ -43,7 +43,7 @@ function resolveStatColor(color: string): string {
   return color.startsWith("#") ? color : "#ffffff";
 }
 
-// ─── Provider badge ──────────────────────────────────────────────────────────
+// ─── Provider badge ──────────────────────────────────────────────────────────────
 
 const PROVIDER_META: Record<string, { label: string; color: string }> = {
   groq:      { label: "Groq",      color: "#f55036" },
@@ -110,11 +110,14 @@ export default function HomePage() {
   useEffect(() => {
     setSavedScenarios(listSavedScenarios());
     fetchModels().then(setAvailableModels);
-    // Fetch plan status to gate Pro models — corrected path to /api/auth/me
-    fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() })
-      .then((r) => r.json())
-      .then((d) => setIsPro(!!d.is_pro))
-      .catch(() => {});
+    // Only fetch plan status if already authenticated — prevents spurious 401 on page load
+    const token = getToken();
+    if (token) {
+      fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() })
+        .then((r) => r.json())
+        .then((d) => setIsPro(!!d.is_pro))
+        .catch(() => {});
+    }
   }, []);
 
   const silentRefresh = useCallback(() => {
@@ -238,7 +241,6 @@ export default function HomePage() {
       });
       if (!res.ok) {
         const err = await res.json();
-        // Surface Pro upgrade hint on 403
         if (res.status === 402 || res.status === 403) {
           throw new Error(err.detail + " → Go to Settings to upgrade.");
         }
@@ -261,7 +263,6 @@ export default function HomePage() {
   };
 
   const totalRuns = runs.length;
-  // Guard: r.results may be undefined for pending/errored runs
   const allScores = runs.flatMap((r) => (r.results ?? []).map((x) => x.score));
   const overallAvg = allScores.length ? allScores.reduce((a, b) => a + b, 0) / allScores.length : null;
   const passRate = allScores.length ? (allScores.filter((s) => s >= 0.8).length / allScores.length) * 100 : null;
@@ -366,7 +367,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* ── Model picker with Pro gating ── */}
               <div>
                 <label className="block text-sm text-gray-400 mb-1">Judge model</label>
                 <div className="relative">
@@ -438,7 +438,6 @@ export default function HomePage() {
                 )}
               </div>
 
-              {/* Scenario library */}
               {savedScenarios.length > 0 && (
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Load from library</label>
@@ -455,7 +454,6 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Save to library */}
               {scenariosYaml.trim() && (
                 <div>
                   {showSaveLib ? (
@@ -475,7 +473,6 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Rubric */}
               <div>
                 <button type="button" onClick={() => { setShowRubric(!showRubric); if (!rubric) setRubric(DEFAULT_RUBRIC_TEXT); }}
                   className="text-xs text-gray-500 hover:text-gray-300">
