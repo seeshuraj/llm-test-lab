@@ -47,25 +47,28 @@ export default function ComparePage() {
     }
   };
 
+  const resultsA = runA?.results ?? [];
+  const resultsB = runB?.results ?? [];
+
   const allScenarioIds = Array.from(
     new Set([
-      ...(runA?.results.map((r) => r.scenario_id) ?? []),
-      ...(runB?.results.map((r) => r.scenario_id) ?? []),
+      ...resultsA.map((r) => r.scenario_id),
+      ...resultsB.map((r) => r.scenario_id),
     ])
   );
 
-  const mapA = Object.fromEntries(runA?.results.map((r) => [r.scenario_id, r]) ?? []);
-  const mapB = Object.fromEntries(runB?.results.map((r) => [r.scenario_id, r]) ?? []);
+  const mapA = Object.fromEntries(resultsA.map((r) => [r.scenario_id, r]));
+  const mapB = Object.fromEntries(resultsB.map((r) => [r.scenario_id, r]));
 
-  const avgA = runA && runA.results.length > 0
-    ? runA.results.reduce((s, r) => s + r.score, 0) / runA.results.length : null;
-  const avgB = runB && runB.results.length > 0
-    ? runB.results.reduce((s, r) => s + r.score, 0) / runB.results.length : null;
+  const avgA = resultsA.length > 0
+    ? resultsA.reduce((s, r) => s + r.score, 0) / resultsA.length : null;
+  const avgB = resultsB.length > 0
+    ? resultsB.reduce((s, r) => s + r.score, 0) / resultsB.length : null;
 
-  const passRateA = runA ? (runA.results.filter(r => r.score >= 0.8).length / runA.results.length) * 100 : null;
-  const passRateB = runB ? (runB.results.filter(r => r.score >= 0.8).length / runB.results.length) * 100 : null;
-  const avgLatA = runA ? runA.results.reduce((s, r) => s + r.latency_ms, 0) / runA.results.length : null;
-  const avgLatB = runB ? runB.results.reduce((s, r) => s + r.latency_ms, 0) / runB.results.length : null;
+  const passRateA = resultsA.length > 0 ? (resultsA.filter(r => r.score >= 0.8).length / resultsA.length) * 100 : null;
+  const passRateB = resultsB.length > 0 ? (resultsB.filter(r => r.score >= 0.8).length / resultsB.length) * 100 : null;
+  const avgLatA = resultsA.length > 0 ? resultsA.reduce((s, r) => s + r.latency_ms, 0) / resultsA.length : null;
+  const avgLatB = resultsB.length > 0 ? resultsB.reduce((s, r) => s + r.latency_ms, 0) / resultsB.length : null;
 
   const scoreBadge = (score: number | undefined) => {
     if (score === undefined) return <span className="text-gray-500">—</span>;
@@ -172,7 +175,7 @@ export default function ComparePage() {
 
       {runA && runB && (
         <>
-          {/* Summary stat cards — bg-gray-900 / border-gray-700 */}
+          {/* Summary stat cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             {[
               { label: "Avg Score A", value: avgA?.toFixed(3) ?? "—", color: scoreColor(avgA ?? 0) },
@@ -188,7 +191,6 @@ export default function ComparePage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            {/* Delta card — inner sections use bg-gray-800 */}
             <div className="bg-gray-900 border border-gray-700 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-gray-300 mb-4">Overall Delta (B − A)</h2>
               <div className="flex items-center justify-around">
@@ -240,7 +242,6 @@ export default function ComparePage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-gray-300">Per-Scenario Diff</h2>
             <div className="flex items-center gap-2">
-              {/* Filter pills — border-gray-700 to match card borders */}
               <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 text-xs">
                 {(["all", "regressions", "improvements"] as const).map((f) => (
                   <button key={f} onClick={() => setFilter(f)}
@@ -254,7 +255,6 @@ export default function ComparePage() {
             </div>
           </div>
 
-          {/* Table — bg-gray-900 cards, bg-gray-800 inner header + alternating rows */}
           <div className="overflow-x-auto rounded-xl border border-gray-700 mb-8">
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-800 text-gray-300">
