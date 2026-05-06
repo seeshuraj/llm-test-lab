@@ -34,20 +34,29 @@ export interface ModelDetail {
   display_name?: string;
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Normalize a raw run object from the backend.
+ *  The backend may return `id` instead of `run_id` — coerce to always have run_id. */
+function normalizeRun(r: any): Run {
+  return { ...r, run_id: r.run_id ?? r.id };
+}
+
 // ─── Runs ────────────────────────────────────────────────────────────────────
 
 export async function fetchRuns(): Promise<Run[]> {
   const res = await fetch(`${API_BASE}/api/runs`, { headers: authHeaders() });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error(`Failed to fetch runs: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return (data as any[]).map(normalizeRun);
 }
 
 export async function fetchRun(id: string): Promise<Run> {
   const res = await fetch(`${API_BASE}/api/runs/${id}`, { headers: authHeaders() });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) throw new Error(`Failed to fetch run: ${res.status}`);
-  return res.json();
+  return normalizeRun(await res.json());
 }
 
 /**
@@ -58,7 +67,7 @@ export async function fetchSharedRun(runId: string): Promise<Run> {
   const res = await fetch(`${API_BASE}/api/runs/${runId}/share`);
   if (res.status === 404) throw new Error("Run not found or not shared");
   if (!res.ok) throw new Error(`Failed to fetch shared run: ${res.status}`);
-  return res.json();
+  return normalizeRun(await res.json());
 }
 
 export async function deleteRun(runId: string): Promise<void> {
@@ -70,6 +79,7 @@ export async function deleteRun(runId: string): Promise<void> {
 }
 
 export async function rerunRun(runId: string): Promise<void> {
+  if (!runId) throw new Error("Invalid run ID");
   const res = await fetch(`${API_BASE}/api/runs/${runId}/rerun`, {
     method: "POST",
     headers: authHeaders(),
@@ -84,7 +94,7 @@ export async function updateRunLabel(runId: string, label: string): Promise<Run>
     body: JSON.stringify({ label }),
   });
   if (!res.ok) throw new Error("Label update failed");
-  return res.json();
+  return normalizeRun(await res.json());
 }
 
 // ─── Models ──────────────────────────────────────────────────────────────────
