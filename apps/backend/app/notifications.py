@@ -231,3 +231,43 @@ async def check_and_notify(
             project=project, run_id=run_id,
             avg_score=avg_score, threshold=threshold
         )
+
+
+async def send_threshold_alert(
+    run_id: str,
+    project: str,
+    mean_score: float,
+    threshold: float,
+) -> None:
+    """Stateless alert fired from main.py when SCORE_FAIL_UNDER threshold is breached.
+
+    This variant does NOT require a DB session or user context — it fires all
+    configured channels (email via RESEND_API_KEY, Slack via SLACK_WEBHOOK_URL,
+    generic webhook via ALERT_WEBHOOK_URL) directly using env-var recipients.
+
+    Set ALERT_EMAIL to override the recipient; falls back to RESEND_FROM_EMAIL.
+    """
+    print(
+        f"[notifications] send_threshold_alert: project={project} "
+        f"run_id={run_id} score={mean_score:.3f} threshold={threshold}"
+    )
+    recipient = os.getenv("ALERT_EMAIL") or os.getenv("FROM_EMAIL", "onboarding@resend.dev")
+    _send_alert_email(
+        to=recipient,
+        project=project,
+        run_id=run_id,
+        avg_score=mean_score,
+        threshold=threshold,
+    )
+    _send_slack_webhook(
+        project=project,
+        run_id=run_id,
+        avg_score=mean_score,
+        threshold=threshold,
+    )
+    _send_generic_webhook(
+        project=project,
+        run_id=run_id,
+        avg_score=mean_score,
+        threshold=threshold,
+    )
