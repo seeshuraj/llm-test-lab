@@ -24,6 +24,7 @@ export interface Run {
   run_label?: string;
   created_at?: string;
   avg_score: number;
+  is_public?: boolean;
   results: ScenarioResult[] | null;
 }
 
@@ -47,6 +48,7 @@ function normalizeRun(r: any): Run {
     // Backend uses `mean_score`; frontend uses `avg_score`
     avg_score: r.avg_score ?? r.mean_score ?? 0,
     results: r.results ?? [],
+    is_public: r.is_public ?? false,
   };
 }
 
@@ -70,10 +72,11 @@ export async function fetchRun(id: string): Promise<Run> {
 /**
  * Fetch a publicly shared run — no auth required.
  * Used by /share/[runId] which is a public report page.
+ * Backend: GET /api/runs/{run_id}/share (is_public must be true)
  */
 export async function fetchSharedRun(runId: string): Promise<Run> {
   const res = await fetch(`${API_BASE}/api/runs/${runId}/share`);
-  if (res.status === 404) throw new Error("Run not found or not shared");
+  if (res.status === 404) throw new Error("Run not found or not shared publicly");
   if (!res.ok) throw new Error(`Failed to fetch shared run: ${res.status}`);
   return normalizeRun(await res.json());
 }
@@ -89,6 +92,7 @@ export async function deleteRun(runId: string): Promise<void> {
 /**
  * Re-run an existing run. Returns the newly created Run so the caller
  * can navigate directly to its detail page (graphs + explanations).
+ * Backend returns RunOut with `id` field — normalizeRun maps it to `run_id`.
  */
 export async function rerunRun(runId: string): Promise<Run> {
   if (!runId) throw new Error("Invalid run ID");
@@ -96,7 +100,10 @@ export async function rerunRun(runId: string): Promise<Run> {
     method: "POST",
     headers: authHeaders(),
   });
-  if (!res.ok) throw new Error("Re-run failed");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Re-run failed (${res.status})`);
+  }
   return normalizeRun(await res.json());
 }
 
@@ -108,6 +115,19 @@ export async function updateRunLabel(runId: string, label: string): Promise<Run>
   });
   if (!res.ok) throw new Error("Label update failed");
   return normalizeRun(await res.json());
+}
+
+/**
+ * Toggle the is_public flag on a run.
+ * Called by the Share button before copying the link.
+ */
+export async function toggleRunPublic(runId: string, isPublic: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/runs/${runId}/share`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ is_public: isPublic }),
+  });
+  if (!res.ok) throw new Error("Failed to update share status");
 }
 
 // ─── Models ──────────────────────────────────────────────────────────────────

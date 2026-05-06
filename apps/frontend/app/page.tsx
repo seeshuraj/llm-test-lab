@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, deleteRun, rerunRun, fetchModels, exportRunCSV, updateRunLabel, Run, ModelDetail } from "@/lib/api";
+import { fetchRuns, deleteRun, rerunRun, fetchModels, updateRunLabel, Run, ModelDetail } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
 import {
   listSavedScenarios, saveScenario, deleteScenario, SavedScenario,
@@ -110,7 +110,6 @@ export default function HomePage() {
   useEffect(() => {
     setSavedScenarios(listSavedScenarios());
     fetchModels().then(setAvailableModels);
-    // Only fetch plan status if already authenticated — prevents spurious 401 on page load
     const token = getToken();
     if (token) {
       fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() })
@@ -167,7 +166,23 @@ export default function HomePage() {
     reader.readAsText(file);
   };
 
-  const handleCopyShareLink = (runId: string) => {
+  const handleCopyShareLink = async (runId: string, isPublic: boolean) => {
+    // If not yet public, toggle it first
+    if (!isPublic) {
+      try {
+        await fetch(`${API_BASE}/api/runs/${runId}/share`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ is_public: true }),
+        });
+        // Update local state
+        setRuns((prev) =>
+          prev.map((r) => (r.run_id === runId ? { ...r, is_public: true } : r))
+        );
+      } catch {
+        // Non-fatal — still copy the link
+      }
+    }
     const url = `${window.location.origin}/share/${runId}`;
     navigator.clipboard.writeText(url).then(() => {
       setCopied(runId);
@@ -198,9 +213,10 @@ export default function HomePage() {
     setRerunning(runId);
     try {
       const newRun = await rerunRun(runId);
-      // Navigate directly to the new run's detail page so the user
-      // immediately sees graphs, scores, and per-scenario explanations.
-      router.push(`/runs/${newRun.run_id}`);
+      // Safely resolve run_id — rerunRun normalizes id→run_id but guard anyway
+      const targetId = newRun.run_id ?? (newRun as any).id;
+      if (!targetId) throw new Error("No run ID returned from re-run");
+      router.push(`/runs/${targetId}`);
     } catch (e) {
       alert(`Re-run failed: ${e}`);
     } finally {
@@ -251,7 +267,6 @@ export default function HomePage() {
       const newRun = normalizeRun(await res.json());
       setShowForm(false);
       setScenariosYaml(""); setFileName(""); setRubric(""); setRunLabel("");
-      // Navigate to the new run's detail page immediately
       router.push(`/runs/${newRun.run_id}`);
     } catch (e) {
       setFormError(String(e));
@@ -283,7 +298,6 @@ export default function HomePage() {
   const ANTHROPIC_PROVIDERS = ["anthropic"];
   const isProModel = (m: ModelDetail) => ANTHROPIC_PROVIDERS.includes(m.provider.toLowerCase());
 
-  // normalizeRun is needed for handleSubmit above
   function normalizeRun(r: any): Run {
     return {
       ...r,
@@ -596,8 +610,10 @@ export default function HomePage() {
                       </span>
                     )}
                     <div className="flex flex-col gap-1">
-                      <button onClick={() => handleCopyShareLink(run.run_id)}
-                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors">
+                      <button
+                        onClick={() => handleCopyShareLink(run.run_id, (run as any).is_public ?? false)}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors"
+                      >
                         {copied === run.run_id ? "✓ Copied" : "Share"}
                       </button>
                       <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}

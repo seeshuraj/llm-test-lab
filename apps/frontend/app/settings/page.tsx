@@ -43,11 +43,24 @@ function SettingsContent() {
 
   async function handleUpgrade() {
     setCheckoutLoading(true);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE}/billing/checkout`, {
         method: "POST",
         headers: authHeaders(),
       });
+      // Stripe not yet configured — show friendly message instead of crashing
+      if (res.status === 503) {
+        setError(
+          "Billing is not yet live. To upgrade manually, email us at hello@llmtestlab.com or check back soon."
+        );
+        return;
+      }
+      if (res.status === 400) {
+        const err = await res.json();
+        setError(err.detail || "You are already on the Pro plan.");
+        return;
+      }
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Failed to start checkout");
@@ -56,6 +69,7 @@ function SettingsContent() {
       window.location.href = url;
     } catch (e) {
       setError(String(e));
+    } finally {
       setCheckoutLoading(false);
     }
   }
@@ -81,8 +95,8 @@ function SettingsContent() {
       )}
 
       {error && (
-        <div className="mb-6 bg-red-900/30 border border-red-700 rounded-xl p-4">
-          <p className="text-red-400 text-sm">{error}</p>
+        <div className="mb-6 bg-amber-900/30 border border-amber-700 rounded-xl p-4">
+          <p className="text-amber-300 text-sm">{error}</p>
         </div>
       )}
 
@@ -115,9 +129,10 @@ function SettingsContent() {
           <div className="space-y-3">
             <div className="space-y-2 text-sm text-gray-400">
               <p>✅ 5 evaluation runs</p>
-              <p>✅ All judge models</p>
+              <p>✅ Groq judge models (Llama 3, Mixtral, Gemma)</p>
               <p>✅ RAG metrics</p>
               <p className="text-gray-600">❌ Unlimited runs</p>
+              <p className="text-gray-600">❌ Claude / Anthropic models</p>
               <p className="text-gray-600">❌ Dataset versioning</p>
             </div>
             <div className="mt-4 pt-4 border-t border-gray-700">
@@ -130,9 +145,9 @@ function SettingsContent() {
                 disabled={checkoutLoading}
                 className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3 px-6 rounded-lg text-sm transition-colors"
               >
-                {checkoutLoading ? "Redirecting to Stripe…" : "Upgrade to Pro →"}
+                {checkoutLoading ? "Redirecting…" : "Upgrade to Pro →"}
               </button>
-              <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout via Stripe. Cancel anytime.</p>
+              <p className="text-xs text-gray-500 mt-2 text-center">Secure checkout via Stripe · Cancel anytime.</p>
             </div>
           </div>
         )}
