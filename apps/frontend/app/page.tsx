@@ -994,37 +994,62 @@ export default function HomePage() {
                         {avg.toFixed(2)}
                       </span>
                     )}
-                    {/* Action buttons */}
-                    <div className="flex flex-col gap-1">
-                      {/* VIEW inline — slides open drawer */}
+
+                    {/* ── Action buttons: horizontal row ── */}
+                    <div className="flex items-center gap-1.5">
+                      {/* View — opens inline drawer */}
                       <button
                         onClick={() => setDrawerRunId(run.run_id)}
-                        className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition-colors text-center font-medium"
+                        className="flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                        title="View run in drawer"
                       >
-                        🔍 View
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                          <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        View
                       </button>
-                      {/* Open full detail page in new tab */}
+
+                      {/* Full page — navigates to /runs/[id] */}
                       <Link
                         href={`/runs/${run.run_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors text-center"
+                        className="flex items-center gap-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="Open full detail page"
                       >
-                        ↗ Full page
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                          <polyline points="15 3 21 3 21 9"/>
+                          <line x1="10" y1="14" x2="21" y2="3"/>
+                        </svg>
+                        Full page
                       </Link>
+
+                      {/* Share */}
                       <button
                         onClick={() => handleCopyShareLink(run.run_id, (run as any).is_public ?? false)}
-                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors"
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="Copy share link"
                       >
-                        {copied === run.run_id ? "✓ Copied" : "Share"}
+                        {copied === run.run_id ? "✓" : "Share"}
                       </button>
-                      <button onClick={() => handleRerun(run.run_id)} disabled={rerunning === run.run_id}
-                        className="text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 px-2 py-1 rounded transition-colors">
+
+                      {/* Re-run */}
+                      <button
+                        onClick={() => handleRerun(run.run_id)}
+                        disabled={rerunning === run.run_id}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="Re-run this evaluation"
+                      >
                         {rerunning === run.run_id ? "…" : "Re-run"}
                       </button>
-                      <button onClick={() => handleDelete(run.run_id)}
-                        className="text-xs bg-gray-700 hover:bg-red-900 text-gray-400 hover:text-red-300 px-2 py-1 rounded transition-colors">
-                        Delete
+
+                      {/* Delete */}
+                      <button
+                        onClick={() => handleDelete(run.run_id)}
+                        className="text-xs bg-gray-700 hover:bg-red-900/60 text-gray-500 hover:text-red-300 px-2.5 py-1.5 rounded-lg transition-colors"
+                        title="Delete run"
+                      >
+                        ✕
                       </button>
                     </div>
                   </div>
