@@ -3,13 +3,14 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { fetchRuns, deleteRun, rerunRun, fetchModels, updateRunLabel, Run, ModelDetail } from "@/lib/api";
+import { fetchRuns, fetchRun, deleteRun, rerunRun, fetchModels, updateRunLabel, exportRunCSV, Run, ModelDetail, ScenarioResult } from "@/lib/api";
 import { getToken, clearToken, authHeaders } from "@/lib/auth";
 import {
   listSavedScenarios, saveScenario, deleteScenario, SavedScenario,
 } from "@/lib/scenario-library";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, PieChart, Pie, Legend,
 } from "recharts";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
@@ -39,6 +40,12 @@ Rules:
 const scoreColor = (s: number) =>
   s >= 0.8 ? "#10b981" : s >= 0.5 ? "#f59e0b" : "#ef4444";
 
+const safeFixed = (v: number | null | undefined, decimals = 2): string =>
+  v == null || isNaN(v) ? "—" : v.toFixed(decimals);
+
+const safeScore = (v: number | null | undefined): number =>
+  v == null || isNaN(v) ? 0 : v;
+
 function resolveStatColor(color: string): string {
   return color.startsWith("#") ? color : "#ffffff";
 }
@@ -65,6 +72,377 @@ function ProviderBadge({ provider }: { provider: string }) {
   );
 }
 
+// ─── RAG metric mini-bar ──────────────────────────────────────────────────────
+
+function RagMetricBar({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 min-w-0">
+      <span className="text-gray-500 text-xs w-28 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.min(safeScore(value), 1) * 100}%`, backgroundColor: color }}
+        />
+      </div>
+      <span className="text-xs font-semibold w-8 text-right" style={{ color }}>
+        {safeFixed(value)}
+      </span>
+    </div>
+  );
+}
+
+function RagMetricsCell({ result }: { result: ScenarioResult }) {
+  const hasRag =
+    result.faithfulness !== undefined ||
+    result.context_precision !== undefined ||
+    result.answer_relevance !== undefined;
+  if (!hasRag) return <span className="text-gray-600 text-xs">—</span>;
+  return (
+    <div className="space-y-1 py-1">
+      {result.faithfulness !== undefined && (
+        <RagMetricBar label="Faithfulness" value={result.faithfulness} color={scoreColor(result.faithfulness)} />
+      )}
+      {result.context_precision !== undefined && (
+        <RagMetricBar label="Ctx Precision" value={result.context_precision} color={scoreColor(result.context_precision)} />
+      )}
+      {result.answer_relevance !== undefined && (
+        <RagMetricBar label="Ans Relevance" value={result.answer_relevance} color={scoreColor(result.answer_relevance)} />
+      )}
+    </div>
+  );
+}
+
+const CustomBarTooltip = ({ active, payload }: any) => {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-lg p-3 text-xs max-w-xs">
+      <p className="text-white font-mono mb-1">{d.id}</p>
+      <p className="text-gray-300">Score: <span className="font-bold" style={{ color: scoreColor(d.score) }}>{safeFixed(d.score)}</span></p>
+      <p className="text-gray-300">Latency: <span className="text-blue-300">{safeFixed(d.latency, 0)} ms</span></p>
+      <p className="text-gray-400 mt-1 leading-relaxed">{d.reason}</p>
+    </div>
+  );
+};
+
+// ─── Run Detail Drawer ─────────────────────────────────────────────────────────
+
+function RunDetailDrawer({ runId, onClose }: { runId: string; onClose: () => void }) {
+  const [run, setRun] = useState<Run | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    setRun(null);
+    setError(null);
+    fetchRun(runId).then(setRun).catch((e) => setError(String(e)));
+    // Trigger slide-in after mount
+    const t = setTimeout(() => setVisible(true), 10);
+    return () => clearTimeout(t);
+  }, [runId]);
+
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") handleClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const handleClose = () => {
+    setVisible(false);
+    setTimeout(onClose, 300);
+  };
+
+  const results = run?.results ?? [];
+  const scores = results.map((r) => safeScore(r.score));
+  const avg = scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+  const minScore = scores.length ? Math.min(...scores) : 0;
+  const maxScore = scores.length ? Math.max(...scores) : 0;
+  const avgLatency = results.length
+    ? results.reduce((a, r) => a + safeScore(r.latency_ms), 0) / results.length
+    : 0;
+  const passed = scores.filter((s) => s >= 0.8).length;
+  const warned = scores.filter((s) => s >= 0.5 && s < 0.8).length;
+  const failed = scores.filter((s) => s < 0.5).length;
+
+  const barData = results.map((r) => ({
+    id: r.scenario_id,
+    score: safeScore(r.score),
+    latency: safeScore(r.latency_ms),
+    reason: r.reason,
+  }));
+
+  const donutData = [
+    { name: "Pass (≥0.8)", value: passed, color: "#10b981" },
+    { name: "Warn (0.5–0.8)", value: warned, color: "#f59e0b" },
+    { name: "Fail (<0.5)", value: failed, color: "#ef4444" },
+  ].filter((d) => d.value > 0);
+
+  const ragResults = results.filter(
+    (r) => r.faithfulness !== undefined || r.context_precision !== undefined || r.answer_relevance !== undefined
+  );
+  const hasRagMetrics = ragResults.length > 0;
+  const avgFaithfulness = ragResults.filter(r => r.faithfulness !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.faithfulness ?? 0), 0) / ragResults.filter(r => r.faithfulness !== undefined).length
+    : null;
+  const avgCtxPrecision = ragResults.filter(r => r.context_precision !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.context_precision ?? 0), 0) / ragResults.filter(r => r.context_precision !== undefined).length
+    : null;
+  const avgAnsRelevance = ragResults.filter(r => r.answer_relevance !== undefined).length
+    ? ragResults.reduce((a, r) => a + (r.answer_relevance ?? 0), 0) / ragResults.filter(r => r.answer_relevance !== undefined).length
+    : null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={handleClose}
+        className="fixed inset-0 bg-black/60 z-40 transition-opacity duration-300"
+        style={{ opacity: visible ? 1 : 0 }}
+      />
+
+      {/* Drawer panel */}
+      <div
+        className="fixed top-0 right-0 h-full w-full max-w-3xl bg-gray-950 border-l border-gray-700 z-50 overflow-y-auto flex flex-col shadow-2xl"
+        style={{
+          transform: visible ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 300ms cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
+      >
+        {/* Drawer header */}
+        <div className="sticky top-0 z-10 bg-gray-950 border-b border-gray-800 px-6 py-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            {run ? (
+              <>
+                <h2 className="text-base font-bold text-white truncate">
+                  {run.run_label || `Run ${run.run_id.slice(0, 8)}…`}
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                  {run.project} · {run.variant_name} · {run.model_name}
+                </p>
+              </>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="h-4 w-48 bg-gray-800 rounded animate-pulse" />
+                <div className="h-3 w-72 bg-gray-800 rounded animate-pulse" />
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {run && (
+              <>
+                <button
+                  onClick={() => exportRunCSV(run)}
+                  className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  ⬇ CSV
+                </button>
+                <Link
+                  href={`/runs/${run.run_id}`}
+                  className="text-xs bg-gray-800 hover:bg-gray-700 text-blue-400 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Open full page ↗
+                </Link>
+              </>
+            )}
+            <button
+              onClick={handleClose}
+              className="text-gray-500 hover:text-white text-xl leading-none px-2 py-1 rounded transition-colors"
+              aria-label="Close drawer"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        {/* Drawer body */}
+        <div className="flex-1 px-6 py-6 space-y-6">
+          {error && (
+            <div className="bg-red-900/30 border border-red-700 rounded-xl p-4">
+              <p className="text-red-400 text-sm">{error}</p>
+            </div>
+          )}
+
+          {!run && !error && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="h-20 bg-gray-800 rounded-xl animate-pulse" />
+                ))}
+              </div>
+              <div className="h-56 bg-gray-800 rounded-xl animate-pulse" />
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="h-9 bg-gray-800 rounded animate-pulse" />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {run && (
+            <>
+              {/* Stat cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Avg Score", value: safeFixed(avg, 3), color: scoreColor(avg) },
+                  { label: "Min Score", value: safeFixed(minScore, 3), color: scoreColor(minScore) },
+                  { label: "Max Score", value: safeFixed(maxScore, 3), color: scoreColor(maxScore) },
+                  { label: "Avg Latency", value: `${safeFixed(avgLatency, 0)} ms`, color: "#60a5fa" },
+                ].map((c) => (
+                  <div key={c.label} className="bg-gray-900 border border-gray-700 rounded-xl p-3 text-center">
+                    <p className="text-xs text-gray-500 mb-1">{c.label}</p>
+                    <p className="text-xl font-bold" style={{ color: c.color }}>{c.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* RAG aggregate card */}
+              {hasRagMetrics && (
+                <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-3">RAG Metric Averages</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {avgFaithfulness !== null && (
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-1">Faithfulness</p>
+                        <p className="text-xl font-bold" style={{ color: scoreColor(avgFaithfulness) }}>{safeFixed(avgFaithfulness)}</p>
+                        <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${safeScore(avgFaithfulness) * 100}%`, backgroundColor: scoreColor(avgFaithfulness) }} />
+                        </div>
+                      </div>
+                    )}
+                    {avgCtxPrecision !== null && (
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-1">Context Precision</p>
+                        <p className="text-xl font-bold" style={{ color: scoreColor(avgCtxPrecision) }}>{safeFixed(avgCtxPrecision)}</p>
+                        <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${safeScore(avgCtxPrecision) * 100}%`, backgroundColor: scoreColor(avgCtxPrecision) }} />
+                        </div>
+                      </div>
+                    )}
+                    {avgAnsRelevance !== null && (
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-1">Answer Relevance</p>
+                        <p className="text-xl font-bold" style={{ color: scoreColor(avgAnsRelevance) }}>{safeFixed(avgAnsRelevance)}</p>
+                        <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full" style={{ width: `${safeScore(avgAnsRelevance) * 100}%`, backgroundColor: scoreColor(avgAnsRelevance) }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* No results banner */}
+              {results.length === 0 && (
+                <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-4 flex items-start gap-3">
+                  <span className="text-yellow-400 text-lg mt-0.5">⚠️</span>
+                  <div>
+                    <p className="text-yellow-300 font-semibold text-sm">No results for this run</p>
+                    <p className="text-yellow-500 text-xs mt-1">
+                      May be blocked by the free plan limit (5 runs). Upgrade to Pro for unlimited runs.
+                    </p>
+                    <Link href="/settings" className="text-yellow-400 underline text-xs mt-2 inline-block">
+                      View plan & upgrade →
+                    </Link>
+                  </div>
+                </div>
+              )}
+
+              {/* Charts — donut + score bar */}
+              {results.length > 0 && (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Pass/Warn/Fail donut */}
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                      <h3 className="text-sm font-semibold text-gray-300 mb-3">Pass / Warn / Fail</h3>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <PieChart>
+                          <Pie data={donutData} cx="50%" cy="50%" innerRadius={40} outerRadius={65}
+                            dataKey="value" paddingAngle={3}>
+                            {donutData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                          </Pie>
+                          <Tooltip formatter={(v: any, name: any) => [v, name]}
+                            contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }} />
+                          <Legend iconSize={10} wrapperStyle={{ fontSize: 11, color: "#9ca3af" }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="flex justify-around text-center mt-1">
+                        <div><p className="text-xs text-gray-500">Pass</p><p className="text-green-400 font-bold">{passed}</p></div>
+                        <div><p className="text-xs text-gray-500">Warn</p><p className="text-yellow-400 font-bold">{warned}</p></div>
+                        <div><p className="text-xs text-gray-500">Fail</p><p className="text-red-400 font-bold">{failed}</p></div>
+                      </div>
+                    </div>
+
+                    {/* Score per scenario bar */}
+                    <div className="bg-gray-900 border border-gray-700 rounded-xl p-4">
+                      <h3 className="text-sm font-semibold text-gray-300 mb-3">Score per Scenario</h3>
+                      <ResponsiveContainer width="100%" height={160}>
+                        <BarChart data={barData} margin={{ top: 0, right: 10, left: -20, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="id" tick={{ fontSize: 9, fill: "#6b7280" }} angle={-30} textAnchor="end" interval={0} />
+                          <YAxis domain={[0, 1]} tick={{ fontSize: 9, fill: "#6b7280" }} tickFormatter={(v) => safeFixed(v, 1)} />
+                          <Tooltip content={<CustomBarTooltip />} />
+                          <Bar dataKey="score" radius={[4, 4, 0, 0]}>
+                            {barData.map((d, i) => <Cell key={i} fill={scoreColor(d.score)} />)}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Scenario detail table */}
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-300 mb-2">Scenario Details</h3>
+                    <div className="overflow-x-auto rounded-xl border border-gray-700">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-800 text-gray-300">
+                          <tr>
+                            <th className="px-3 py-2.5 text-xs">Scenario</th>
+                            <th className="px-3 py-2.5 text-xs">Score</th>
+                            <th className="px-3 py-2.5 text-xs">Latency</th>
+                            <th className="px-3 py-2.5 text-xs">Judge</th>
+                            {hasRagMetrics && <th className="px-3 py-2.5 text-xs">RAG</th>}
+                            <th className="px-3 py-2.5 text-xs">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {results.map((r, i) => (
+                            <tr key={r.scenario_id} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-950"}>
+                              <td className="px-3 py-2.5 font-mono text-xs text-gray-300 max-w-[120px] truncate">{r.scenario_id}</td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-14 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full" style={{ width: `${safeScore(r.score) * 100}%`, backgroundColor: scoreColor(r.score) }} />
+                                  </div>
+                                  <span className="font-bold text-xs" style={{ color: scoreColor(r.score) }}>{safeFixed(r.score)}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-blue-300 text-xs">{safeFixed(r.latency_ms, 0)} ms</td>
+                              <td className="px-3 py-2.5 text-gray-400 font-mono text-xs truncate max-w-[80px]">{r.judge_model}</td>
+                              {hasRagMetrics && (
+                                <td className="px-3 py-2.5 min-w-[160px]">
+                                  <RagMetricsCell result={r} />
+                                </td>
+                              )}
+                              <td className="px-3 py-2.5 text-gray-300 text-xs leading-relaxed max-w-[200px]">{r.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function HomePage() {
   const router = useRouter();
   const [runs, setRuns] = useState<Run[]>([]);
@@ -74,6 +452,9 @@ export default function HomePage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [rerunning, setRerunning] = useState<string | null>(null);
+
+  // ── Drawer state
+  const [drawerRunId, setDrawerRunId] = useState<string | null>(null);
 
   const [editingLabel, setEditingLabel] = useState<string | null>(null);
   const [editLabelValue, setEditLabelValue] = useState("");
@@ -288,7 +669,7 @@ export default function HomePage() {
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .slice(-10)
     .map((r) => ({
-      t: run.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
+      t: r.run_label || (r.created_at ? new Date(r.created_at).toLocaleDateString() : r.run_id.slice(0, 6)),
       avg: r.avg_score ?? null,
     }))
     .filter((d): d is { t: string; avg: number } => d.avg != null);
@@ -308,6 +689,11 @@ export default function HomePage() {
 
   return (
     <main className="max-w-6xl mx-auto p-8">
+      {/* Drawer */}
+      {drawerRunId && (
+        <RunDetailDrawer runId={drawerRunId} onClose={() => setDrawerRunId(null)} />
+      )}
+
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-white">LLM Test Lab</h1>
@@ -579,12 +965,12 @@ export default function HomePage() {
                         </div>
                       ) : (
                         <div className="flex items-center gap-1.5">
-                          <Link
-                            href={`/runs/${run.run_id}`}
-                            className="font-semibold text-white text-sm hover:text-blue-300 transition-colors"
+                          <button
+                            onClick={() => setDrawerRunId(run.run_id)}
+                            className="font-semibold text-white text-sm hover:text-blue-300 transition-colors text-left"
                           >
                             {run.run_label || run.project}
-                          </Link>
+                          </button>
                           <button
                             onClick={() => { setEditingLabel(run.run_id); setEditLabelValue(run.run_label || ""); }}
                             className="text-gray-600 hover:text-gray-400 text-xs"
@@ -610,12 +996,21 @@ export default function HomePage() {
                     )}
                     {/* Action buttons */}
                     <div className="flex flex-col gap-1">
-                      {/* VIEW — primary action, highlighted blue */}
-                      <Link
-                        href={`/runs/${run.run_id}`}
+                      {/* VIEW inline — slides open drawer */}
+                      <button
+                        onClick={() => setDrawerRunId(run.run_id)}
                         className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded transition-colors text-center font-medium"
                       >
                         🔍 View
+                      </button>
+                      {/* Open full detail page in new tab */}
+                      <Link
+                        href={`/runs/${run.run_id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded transition-colors text-center"
+                      >
+                        ↗ Full page
                       </Link>
                       <button
                         onClick={() => handleCopyShareLink(run.run_id, (run as any).is_public ?? false)}
