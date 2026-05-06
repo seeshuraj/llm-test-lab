@@ -180,7 +180,8 @@ class ScenarioResultOut(BaseModel):
     latency_ms: float
     judge_model: str
     faithfulness: Optional[float] = None
-    answer_relevancy: Optional[float] = None
+    # FIX: was answer_relevancy — frontend expects answer_relevance
+    answer_relevance: Optional[float] = None
     context_precision: Optional[float] = None
     context_recall: Optional[float] = None
 
@@ -208,6 +209,10 @@ class RunSummaryOut(BaseModel):
     mean_score: float
     dataset_version_id: Optional[str] = None
     is_public: bool = False
+
+
+class RunLabelUpdate(BaseModel):
+    label: Optional[str] = None
 
 
 class ShareScenarioResultOut(BaseModel):
@@ -346,7 +351,8 @@ def _build_share_result(r: RunScenarioResult) -> ShareScenarioResultOut:
         judge_model=r.judge_model,
         faithfulness=rag.get("faithfulness"),
         context_precision=rag.get("context_precision"),
-        answer_relevance=rag.get("answer_relevancy"),
+        # support both key spellings from rag_metrics.py
+        answer_relevance=rag.get("answer_relevance") or rag.get("answer_relevancy"),
     )
 
 
@@ -500,7 +506,10 @@ async def create_run(
             reason=r.reason,
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
-            **(r.rag_scores or {}),
+            faithfulness=(r.rag_scores or {}).get("faithfulness"),
+            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
+            context_precision=(r.rag_scores or {}).get("context_precision"),
+            context_recall=(r.rag_scores or {}).get("context_recall"),
         )
         for r in results
     ]
@@ -582,7 +591,10 @@ async def get_run(
             reason=r.reason,
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
-            **(r.rag_scores or {}),
+            faithfulness=(r.rag_scores or {}).get("faithfulness"),
+            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
+            context_precision=(r.rag_scores or {}).get("context_precision"),
+            context_recall=(r.rag_scores or {}).get("context_recall"),
         )
         for r in run.results
     ]
@@ -595,6 +607,69 @@ async def get_run(
         created_at=run.created_at,
         mean_score=mean_score,
         results=results_out,
+        dataset_version_id=run.dataset_version_id,
+        is_public=run.is_public,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Delete run  (FIX: was missing entirely)
+# ---------------------------------------------------------------------------
+
+@app.delete("/api/runs/{run_id}", status_code=204)
+async def delete_run(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Run).where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    # Delete child results first to satisfy FK constraint
+    await db.execute(
+        text("DELETE FROM run_scenario_results WHERE run_id = :rid"),
+        {"rid": run_id},
+    )
+    await db.delete(run)
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Update run label  (FIX: was missing entirely)
+# ---------------------------------------------------------------------------
+
+@app.patch("/api/runs/{run_id}/label", response_model=RunSummaryOut)
+async def update_run_label(
+    run_id: str,
+    body: RunLabelUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Run)
+        .options(selectinload(Run.results))
+        .where(Run.id == run_id, Run.user_id == current_user.id)
+    )
+    run = result.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run.run_label = body.label
+    await db.commit()
+    await db.refresh(run)
+    mean_score = (
+        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
+    )
+    return RunSummaryOut(
+        id=run.id,
+        project=run.project,
+        variant_name=run.variant_name,
+        model_name=run.model_name,
+        run_label=run.run_label,
+        created_at=run.created_at,
+        mean_score=round(mean_score, 4),
         dataset_version_id=run.dataset_version_id,
         is_public=run.is_public,
     )
@@ -741,7 +816,10 @@ async def rerun_run(
             reason=r.reason,
             latency_ms=r.latency_ms,
             judge_model=r.judge_model,
-            **(r.rag_scores or {}),
+            faithfulness=(r.rag_scores or {}).get("faithfulness"),
+            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
+            context_precision=(r.rag_scores or {}).get("context_precision"),
+            context_recall=(r.rag_scores or {}).get("context_recall"),
         )
         for r in results
     ]
