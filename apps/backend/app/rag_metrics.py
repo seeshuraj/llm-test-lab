@@ -2,13 +2,21 @@
 RAG-specific metrics computed per scenario result.
 
 Metrics:
-  - faithfulness:        Does the answer stay within the context? (LLM judge)
-  - context_recall:      Does the context contain enough to answer the question? (embedding similarity)
-  - answer_relevancy:    Is the answer on-topic for the question? (embedding cosine similarity)
-  - context_precision:   Is the retrieved context actually needed / not noisy? (LLM judge)
+  - faithfulness:        Does the answer stay within the context? (LLM judge, claim-level)
+  - context_recall:      Does the context contain enough to answer the question? (embedding sim)
+  - answer_relevance:    Is the answer on-topic for the question? (embedding cosine sim)
+  - context_precision:   Is the retrieved context focused / not noisy? (LLM judge)
+
+Accuracy improvements (v2):
+  - Fixed: `expected` kwarg now accepted (was causing silent crash in main.py)
+  - Fixed: output key renamed answer_relevancy → answer_relevance (consistent with main.py)
+  - Faithfulness uses claim decomposition (RAGAS-style) not holistic prompt
+  - Context recall uses `expected` answer when available for better signal
+  - LLM judge prompts use step-by-step CoT before score (G-Eval style)
+  - Verbosity bias mitigation: explicit anti-verbosity instruction in prompts
+  - All scores clamped to [0, 1]
 
 Each metric returns a float in [0.0, 1.0].
-All four are returned together as a RagScores dict.
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ from typing import Optional
 
 
 # ---------------------------------------------------------------------------
-# Embedding-based helpers
+# Embedding helpers
 # ---------------------------------------------------------------------------
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
@@ -35,6 +43,7 @@ def _get_embedder():
     """Lazy-load SentenceTransformer so it doesn't slow startup."""
     try:
         from sentence_transformers import SentenceTransformer
+        # all-MiniLM-L6-v2: fast, good quality, 384-dim embeddings
         return SentenceTransformer("all-MiniLM-L6-v2")
     except ImportError:
         return None
@@ -53,11 +62,11 @@ def _embed(text: str) -> Optional[list[float]]:
 
 
 # ---------------------------------------------------------------------------
-# LLM-judge-based helpers
+# LLM-judge helpers
 # ---------------------------------------------------------------------------
 
-def _extract_score_from_json(text: str) -> Optional[float]:
-    """Extract a numeric score from LLM JSON response like {\"score\": 0.8}."""
+def _extract_score(text: str) -> Optional[float]:
+    """Extract a numeric score from LLM JSON response."""
     try:
         match = re.search(r'\{[^}]*"score"\s*:\s*([0-9.]+)[^}]*\}', text)
         if match:
@@ -65,131 +74,182 @@ def _extract_score_from_json(text: str) -> Optional[float]:
         data = json.loads(text)
         return float(data.get("score", 0.5))
     except Exception:
-        # fallback: find first float in range [0,1]
-        nums = re.findall(r'\b(0(?:\.\d+)?|1(?:\.0+)?)\b', text)
-        return float(nums[0]) if nums else 0.5
+        nums = re.findall(r"\b(0(?:\.\d+)?|1(?:\.0+)?)\b", text)
+        return float(nums[0]) if nums else None
 
 
 async def _llm_score(judge, prompt: str) -> float:
-    """Call the Groq judge with a scoring prompt, return float 0-1."""
+    """Call the Groq/Anthropic judge with a raw scoring prompt."""
     try:
-        result = await judge.judge(
+        # Use _single_judge at temp=0 for determinism on RAG metrics
+        result = await judge._single_judge(
             question="",
             context="",
             answer="",
             rubric=prompt,
-            _raw_prompt_override=prompt,
+            temperature=0.0,
         )
-        # GroqJudgeClient returns a JudgeResult with .score
-        if hasattr(result, "score"):
-            return max(0.0, min(1.0, float(result.score)))
-        return _extract_score_from_json(str(result)) or 0.5
+        return max(0.0, min(1.0, float(result.score)))
     except Exception:
+        # Fallback to legacy judge() if _single_judge not available
+        try:
+            result = await judge.judge(
+                question="",
+                context="",
+                answer="",
+                rubric=prompt,
+            )
+            return max(0.0, min(1.0, float(result.score)))
+        except Exception:
+            return 0.5
+
+
+# ---------------------------------------------------------------------------
+# Public types
+# ---------------------------------------------------------------------------
+
+class RagScores:
+    __slots__ = ("faithfulness", "context_recall", "answer_relevance", "context_precision")
+
+    def __init__(
+        self,
+        faithfulness: float,
+        context_recall: float,
+        answer_relevance: float,
+        context_precision: float,
+    ):
+        self.faithfulness = round(max(0.0, min(1.0, faithfulness)), 4)
+        self.context_recall = round(max(0.0, min(1.0, context_recall)), 4)
+        self.answer_relevance = round(max(0.0, min(1.0, answer_relevance)), 4)
+        self.context_precision = round(max(0.0, min(1.0, context_precision)), 4)
+
+    def to_dict(self) -> dict:
+        return {
+            "faithfulness": self.faithfulness,
+            "context_recall": self.context_recall,
+            "answer_relevance": self.answer_relevance,
+            "context_precision": self.context_precision,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Metric implementations
+# ---------------------------------------------------------------------------
+
+async def _compute_faithfulness(judge, context: str, answer: str) -> float:
+    """
+    RAGAS-style faithfulness: decompose answer into atomic claims,
+    then check each claim against context.
+
+    Prompt uses CoT (G-Eval style) to reduce hallucinated scores.
+    Anti-verbosity instruction prevents longer answers getting free points.
+    """
+    prompt = (
+        "You are evaluating faithfulness: does the answer contain ONLY information "
+        "supported by the context? Longer answers are NOT inherently better — "
+        "extra ungrounded claims REDUCE the score.\n\n"
+        f"## Context\n{context}\n\n"
+        f"## Answer\n{answer}\n\n"
+        "## Step-by-step instructions\n"
+        "1. List every distinct factual claim made in the answer (max 10).\n"
+        "2. For each claim, mark it as SUPPORTED or UNSUPPORTED by the context.\n"
+        "3. Score = (number of SUPPORTED claims) / (total claims).\n"
+        "4. If the answer makes no factual claims, score = 1.0.\n"
+        "5. If the answer directly contradicts the context, score = 0.0.\n\n"
+        'Respond ONLY with JSON: {"score": <float 0-1>, "reason": "<brief>"}'
+    )
+    return await _llm_score(judge, prompt)
+
+
+async def _compute_context_precision(judge, question: str, context: str) -> float:
+    """
+    Context precision: is the retrieved context focused and relevant to the question?
+    Penalises noisy / irrelevant context even if the answer is correct.
+    """
+    prompt = (
+        "You are evaluating context precision: is the provided context focused and "
+        "relevant to the question, with minimal noise or off-topic information?\n\n"
+        f"## Question\n{question}\n\n"
+        f"## Context\n{context}\n\n"
+        "## Step-by-step instructions\n"
+        "1. Identify sentences in the context that are directly useful for answering the question.\n"
+        "2. Identify sentences that are irrelevant noise.\n"
+        "3. Score = (useful sentences) / (total sentences). Round to 2 decimal places.\n"
+        "4. If all context is relevant, score = 1.0. If none is relevant, score = 0.0.\n\n"
+        'Respond ONLY with JSON: {"score": <float 0-1>, "reason": "<brief>"}'
+    )
+    return await _llm_score(judge, prompt)
+
+
+def _compute_context_recall_embedding(
+    context: str,
+    question: str,
+    expected: str,
+) -> float:
+    """
+    Embedding-based context recall.
+    When expected answer is available: measures how well the context covers the expected answer.
+    When not: falls back to question-context similarity as a proxy.
+    """
+    reference = expected.strip() if expected and expected.strip() else question
+    ctx_emb = _embed(context)
+    ref_emb = _embed(reference)
+    if ctx_emb is None or ref_emb is None:
+        # No embedder available: return neutral
         return 0.5
+    return _cosine_sim(ctx_emb, ref_emb)
+
+
+def _compute_answer_relevance_embedding(question: str, answer: str) -> float:
+    """
+    Answer relevance: cosine similarity between question and answer embeddings.
+    High relevance = answer directly addresses the question.
+    """
+    q_emb = _embed(question)
+    a_emb = _embed(answer)
+    if q_emb is None or a_emb is None:
+        return 0.5
+    return _cosine_sim(q_emb, a_emb)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-class RagScores:
-    __slots__ = ("faithfulness", "context_recall", "answer_relevancy", "context_precision")
-
-    def __init__(
-        self,
-        faithfulness: float,
-        context_recall: float,
-        answer_relevancy: float,
-        context_precision: float,
-    ):
-        self.faithfulness = round(faithfulness, 4)
-        self.context_recall = round(context_recall, 4)
-        self.answer_relevancy = round(answer_relevancy, 4)
-        self.context_precision = round(context_precision, 4)
-
-    def to_dict(self) -> dict:
-        return {
-            "faithfulness": self.faithfulness,
-            "context_recall": self.context_recall,
-            "answer_relevancy": self.answer_relevancy,
-            "context_precision": self.context_precision,
-        }
-
-
 async def compute_rag_metrics(
     *,
     question: str,
     context: str,
     answer: str,
-    judge,  # GroqJudgeClient instance
-) -> RagScores:
+    judge,  # GroqJudgeClient or AnthropicJudgeClient instance
+    expected: str = "",  # FIX: was missing — main.py passes this kwarg
+) -> dict:
     """
     Compute all 4 RAG metrics for a single scenario result.
-    Falls back gracefully if embeddings unavailable.
+    Returns a plain dict (stored as JSON in rag_scores column).
+    Falls back gracefully when embeddings or judge unavailable.
     """
+    import asyncio
 
-    # --- 1. Faithfulness (LLM judge) ---
-    # Does the answer only use information from the context?
-    faithfulness_prompt = (
-        f"You are evaluating whether an AI answer is faithful to the provided context.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Answer:\n{answer}\n\n"
-        f"Rules:\n"
-        f"- Score 1.0 if every claim in the answer is directly supported by the context.\n"
-        f"- Score 0.5 if some claims are supported but others are from outside the context.\n"
-        f"- Score 0.0 if the answer contradicts or ignores the context entirely.\n"
-        f"Respond only with JSON: {{\"score\": <float 0-1>, \"reason\": \"...\"}}"
+    # LLM-judge metrics run concurrently
+    faithfulness_task = asyncio.create_task(
+        _compute_faithfulness(judge, context, answer)
     )
-    faithfulness = await _llm_score(judge, faithfulness_prompt)
-
-    # --- 2. Context Recall (embedding similarity: context vs question) ---
-    # Does the context actually contain information relevant to answer the question?
-    context_recall: float
-    q_emb = _embed(question)
-    c_emb = _embed(context)
-    if q_emb and c_emb:
-        context_recall = max(0.0, min(1.0, _cosine_sim(q_emb, c_emb)))
-    else:
-        # fallback to LLM judge
-        cr_prompt = (
-            f"Question: {question}\n\nContext:\n{context}\n\n"
-            f"Does the context contain sufficient information to answer the question?\n"
-            f"Score 1.0 = fully sufficient, 0.5 = partial, 0.0 = irrelevant.\n"
-            f"Respond only with JSON: {{\"score\": <float 0-1>}}"
-        )
-        context_recall = await _llm_score(judge, cr_prompt)
-
-    # --- 3. Answer Relevancy (embedding similarity: answer vs question) ---
-    # Is the answer actually answering the question asked?
-    answer_relevancy: float
-    a_emb = _embed(answer)
-    if q_emb and a_emb:
-        answer_relevancy = max(0.0, min(1.0, _cosine_sim(q_emb, a_emb)))
-    else:
-        ar_prompt = (
-            f"Question: {question}\n\nAnswer:\n{answer}\n\n"
-            f"Is the answer directly relevant to the question?\n"
-            f"Score 1.0 = fully relevant, 0.5 = partially relevant, 0.0 = off-topic.\n"
-            f"Respond only with JSON: {{\"score\": <float 0-1>}}"
-        )
-        answer_relevancy = await _llm_score(judge, ar_prompt)
-
-    # --- 4. Context Precision (LLM judge) ---
-    # Is the retrieved context focused and not noisy / padded with irrelevant info?
-    cp_prompt = (
-        f"Question: {question}\n\nContext:\n{context}\n\n"
-        f"Evaluate how precise and focused the context is for answering the question.\n"
-        f"Rules:\n"
-        f"- Score 1.0 if every sentence in the context is relevant to the question.\n"
-        f"- Score 0.5 if the context contains a mix of relevant and irrelevant content.\n"
-        f"- Score 0.0 if the context is mostly noise or unrelated to the question.\n"
-        f"Respond only with JSON: {{\"score\": <float 0-1>, \"reason\": \"...\"}}"
+    context_precision_task = asyncio.create_task(
+        _compute_context_precision(judge, question, context)
     )
-    context_precision = await _llm_score(judge, cp_prompt)
 
-    return RagScores(
+    # Embedding metrics are synchronous (CPU-bound)
+    context_recall = _compute_context_recall_embedding(context, question, expected)
+    answer_relevance = _compute_answer_relevance_embedding(question, answer)
+
+    faithfulness = await faithfulness_task
+    context_precision = await context_precision_task
+
+    scores = RagScores(
         faithfulness=faithfulness,
         context_recall=context_recall,
-        answer_relevancy=answer_relevancy,
+        answer_relevance=answer_relevance,
         context_precision=context_precision,
     )
+    return scores.to_dict()

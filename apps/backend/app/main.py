@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="LLM Test Lab API",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
@@ -84,7 +84,6 @@ raw_origins = os.environ.get(
 )
 exact_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
 
-# Patterns that are always trusted in addition to exact_origins:
 _TRUSTED_PATTERNS = [
     re.compile(r"https://llm-test-lab.*\.vercel\.app$"),
     re.compile(r"https://.*-seeshurajs-projects\.vercel\.app$"),
@@ -98,8 +97,6 @@ def _is_origin_allowed(origin: str) -> bool:
 
 
 class DynamicCORSMiddleware(BaseHTTPMiddleware):
-    """Handles CORS with wildcard Vercel preview support."""
-
     CORS_HEADERS = {
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
@@ -110,12 +107,9 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin", "")
         allowed = _is_origin_allowed(origin)
-
-        # Handle preflight
         if request.method == "OPTIONS":
             headers = {"Access-Control-Allow-Origin": origin if allowed else "", **self.CORS_HEADERS}
             return Response(status_code=204, headers=headers)
-
         response = await call_next(request)
         if allowed and origin:
             response.headers["Access-Control-Allow-Origin"] = origin
@@ -180,7 +174,6 @@ class ScenarioResultOut(BaseModel):
     latency_ms: float
     judge_model: str
     faithfulness: Optional[float] = None
-    # FIX: was answer_relevancy — frontend expects answer_relevance
     answer_relevance: Optional[float] = None
     context_precision: Optional[float] = None
     context_recall: Optional[float] = None
@@ -241,7 +234,7 @@ class ShareToggleRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auth routes  (prefixed /api/auth/* to match frontend calls)
+# Auth routes
 # ---------------------------------------------------------------------------
 
 @app.post("/api/auth/register", status_code=201)
@@ -284,12 +277,10 @@ async def me(current_user: User = Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 
 _MODELS: list[ModelDetailOut] = [
-    # Free tier — Groq-hosted open models
     ModelDetailOut(id="llama3-8b-8192",      name="Llama 3 8B",    provider="Groq",      description="Fast, capable open model via Groq",    pro_only=False),
     ModelDetailOut(id="llama3-70b-8192",     name="Llama 3 70B",   provider="Groq",      description="Larger Llama 3 via Groq",               pro_only=False),
     ModelDetailOut(id="mixtral-8x7b-32768",  name="Mixtral 8x7B",  provider="Groq",      description="MoE model via Groq",                    pro_only=False),
     ModelDetailOut(id="gemma-7b-it",         name="Gemma 7B",      provider="Groq",      description="Google Gemma 7B via Groq",              pro_only=False),
-    # Pro tier — Anthropic Claude
     ModelDetailOut(id="claude-3-haiku-20240307",      name="Claude 3 Haiku",       provider="Anthropic", description="Fastest Claude model — Pro only",           pro_only=True),
     ModelDetailOut(id="claude-3-5-haiku-20241022",    name="Claude 3.5 Haiku",     provider="Anthropic", description="Fastest Claude 3.5 model — Pro only",       pro_only=True),
     ModelDetailOut(id="claude-3-sonnet-20240229",     name="Claude 3 Sonnet",      provider="Anthropic", description="Balanced Claude model — Pro only",           pro_only=True),
@@ -304,7 +295,7 @@ async def list_models():
 
 
 # ---------------------------------------------------------------------------
-# Run execution
+# Run execution helpers
 # ---------------------------------------------------------------------------
 
 async def _get_llm_answer(
@@ -314,7 +305,6 @@ async def _get_llm_answer(
     model_name: str,
     app_endpoint_url: Optional[str],
 ) -> tuple[str, float]:
-    """Get an answer from the LLM or a custom app endpoint."""
     t0 = time.monotonic()
     if app_endpoint_url:
         try:
@@ -341,8 +331,20 @@ async def _get_llm_answer(
     return answer, latency_ms
 
 
+def _rag_scores_from_dict(d: Optional[dict]) -> dict:
+    """Normalise rag_scores dict — handles both answer_relevancy and answer_relevance keys."""
+    if not d:
+        return {}
+    return {
+        "faithfulness": d.get("faithfulness"),
+        "answer_relevance": d.get("answer_relevance") or d.get("answer_relevancy"),
+        "context_precision": d.get("context_precision"),
+        "context_recall": d.get("context_recall"),
+    }
+
+
 def _build_share_result(r: RunScenarioResult) -> ShareScenarioResultOut:
-    rag = r.rag_scores or {}
+    rag = _rag_scores_from_dict(r.rag_scores)
     return ShareScenarioResultOut(
         scenario_id=r.scenario_id,
         score=r.score,
@@ -351,10 +353,90 @@ def _build_share_result(r: RunScenarioResult) -> ShareScenarioResultOut:
         judge_model=r.judge_model,
         faithfulness=rag.get("faithfulness"),
         context_precision=rag.get("context_precision"),
-        # support both key spellings from rag_metrics.py
-        answer_relevance=rag.get("answer_relevance") or rag.get("answer_relevancy"),
+        answer_relevance=rag.get("answer_relevance"),
     )
 
+
+def _make_scenario_result_out(r: RunScenarioResult) -> ScenarioResultOut:
+    rag = _rag_scores_from_dict(r.rag_scores)
+    return ScenarioResultOut(
+        scenario_id=r.scenario_id,
+        variant_id=r.variant_id,
+        score=r.score,
+        reason=r.reason,
+        latency_ms=r.latency_ms,
+        judge_model=r.judge_model,
+        faithfulness=rag.get("faithfulness"),
+        answer_relevance=rag.get("answer_relevance"),
+        context_precision=rag.get("context_precision"),
+        context_recall=rag.get("context_recall"),
+    )
+
+
+async def _run_scenarios(
+    *,
+    scenarios: list[dict],
+    model_name: str,
+    rubric: str,
+    app_endpoint_url: Optional[str],
+    run_id: str,
+    variant_name: str,
+    judge,
+) -> list[RunScenarioResult]:
+    """Core evaluation loop — shared by create_run and rerun_run."""
+    results: list[RunScenarioResult] = []
+    for scenario in scenarios:
+        scenario_id = scenario.get("id", str(uuid.uuid4()))
+        question = scenario.get("question", "")
+        context = scenario.get("context", "")
+        expected = scenario.get("expected_answer", "")
+
+        answer, latency_ms = await _get_llm_answer(
+            question=question,
+            context=context,
+            model_name=model_name,
+            app_endpoint_url=app_endpoint_url,
+        )
+
+        judge_result = await judge.judge(
+            question=question,
+            context=context,
+            answer=answer,
+            rubric=rubric or "",
+        )
+
+        rag_scores = None
+        if context and answer:
+            try:
+                rag_scores = await compute_rag_metrics(
+                    question=question,
+                    answer=answer,
+                    context=context,
+                    judge=judge,
+                    expected=expected,  # FIX: was missing judge kwarg; expected was there but signature didn't accept it
+                )
+            except Exception as exc:
+                logger.warning("RAG metrics failed for scenario %s: %s", scenario_id, exc)
+                rag_scores = None
+
+        results.append(
+            RunScenarioResult(
+                run_id=run_id,
+                scenario_id=scenario_id,
+                variant_id=variant_name,
+                score=judge_result.score,
+                reason=judge_result.reason,
+                latency_ms=latency_ms,
+                judge_model=model_name,
+                rag_scores=rag_scores,
+            )
+        )
+    return results
+
+
+# ---------------------------------------------------------------------------
+# POST /api/runs
+# ---------------------------------------------------------------------------
 
 @app.post("/api/runs", response_model=RunOut, status_code=201)
 async def create_run(
@@ -362,7 +444,6 @@ async def create_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # --- Pro gate: Claude models are restricted to Pro users ---
     if body.model_name in ANTHROPIC_MODELS and not current_user.is_pro:
         raise HTTPException(
             status_code=403,
@@ -373,13 +454,11 @@ async def create_run(
             headers={"X-Upgrade-URL": "/billing/checkout"},
         )
 
-    # --- Free-trial gate: limit total runs for free users ---
     if not current_user.is_pro:
         run_count_result = await db.execute(
             select(func.count(Run.id)).where(Run.user_id == current_user.id)
         )
-        run_count = run_count_result.scalar_one()
-        if run_count >= FREE_TRIAL_RUN_LIMIT:
+        if run_count_result.scalar_one() >= FREE_TRIAL_RUN_LIMIT:
             raise HTTPException(
                 status_code=402,
                 detail=(
@@ -412,53 +491,16 @@ async def create_run(
 
     run_id = str(uuid.uuid4())
     judge = judge_factory(body.model_name)
-    results: list[RunScenarioResult] = []
 
-    for scenario in scenarios:
-        scenario_id = scenario.get("id", str(uuid.uuid4()))
-        question = scenario.get("question", "")
-        context = scenario.get("context", "")
-        expected = scenario.get("expected_answer", "")
-
-        answer, latency_ms = await _get_llm_answer(
-            question=question,
-            context=context,
-            model_name=body.model_name,
-            app_endpoint_url=body.app_endpoint_url,
-        )
-
-        judge_result = await judge.judge(
-            question=question,
-            context=context,
-            answer=answer,
-            rubric=body.rubric or "",
-        )
-        score, reason = judge_result.score, judge_result.reason
-
-        rag_scores = None
-        if context and answer:
-            try:
-                rag_scores = await compute_rag_metrics(
-                    question=question,
-                    answer=answer,
-                    context=context,
-                    expected=expected,
-                )
-            except Exception:
-                rag_scores = None
-
-        results.append(
-            RunScenarioResult(
-                run_id=run_id,
-                scenario_id=scenario_id,
-                variant_id=body.variant_name,
-                score=score,
-                reason=reason,
-                latency_ms=latency_ms,
-                judge_model=body.model_name,
-                rag_scores=rag_scores,
-            )
-        )
+    results = await _run_scenarios(
+        scenarios=scenarios,
+        model_name=body.model_name,
+        rubric=body.rubric or "",
+        app_endpoint_url=body.app_endpoint_url,
+        run_id=run_id,
+        variant_name=body.variant_name,
+        judge=judge,
+    )
 
     mean_score = sum(r.score for r in results) / len(results) if results else 0.0
 
@@ -498,22 +540,6 @@ async def create_run(
         except ValueError:
             pass
 
-    results_out = [
-        ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-            faithfulness=(r.rag_scores or {}).get("faithfulness"),
-            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
-            context_precision=(r.rag_scores or {}).get("context_precision"),
-            context_recall=(r.rag_scores or {}).get("context_recall"),
-        )
-        for r in results
-    ]
-
     return RunOut(
         id=run.id,
         project=run.project,
@@ -521,15 +547,15 @@ async def create_run(
         model_name=run.model_name,
         run_label=run.run_label,
         created_at=run.created_at,
-        mean_score=mean_score,
-        results=results_out,
+        mean_score=round(mean_score, 4),
+        results=[_make_scenario_result_out(r) for r in results],
         dataset_version_id=dataset_version_id,
         is_public=False,
     )
 
 
 # ---------------------------------------------------------------------------
-# Run queries
+# GET /api/runs
 # ---------------------------------------------------------------------------
 
 @app.get("/api/runs", response_model=list[RunSummaryOut])
@@ -565,6 +591,10 @@ async def list_runs(
     ]
 
 
+# ---------------------------------------------------------------------------
+# GET /api/runs/{run_id}
+# ---------------------------------------------------------------------------
+
 @app.get("/api/runs/{run_id}", response_model=RunOut)
 async def get_run(
     run_id: str,
@@ -579,25 +609,7 @@ async def get_run(
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-
-    mean_score = (
-        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
-    )
-    results_out = [
-        ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-            faithfulness=(r.rag_scores or {}).get("faithfulness"),
-            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
-            context_precision=(r.rag_scores or {}).get("context_precision"),
-            context_recall=(r.rag_scores or {}).get("context_recall"),
-        )
-        for r in run.results
-    ]
+    mean_score = sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
     return RunOut(
         id=run.id,
         project=run.project,
@@ -605,15 +617,15 @@ async def get_run(
         model_name=run.model_name,
         run_label=run.run_label,
         created_at=run.created_at,
-        mean_score=mean_score,
-        results=results_out,
+        mean_score=round(mean_score, 4),
+        results=[_make_scenario_result_out(r) for r in run.results],
         dataset_version_id=run.dataset_version_id,
         is_public=run.is_public,
     )
 
 
 # ---------------------------------------------------------------------------
-# Delete run  (FIX: was missing entirely)
+# DELETE /api/runs/{run_id}
 # ---------------------------------------------------------------------------
 
 @app.delete("/api/runs/{run_id}", status_code=204)
@@ -628,7 +640,6 @@ async def delete_run(
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    # Delete child results first to satisfy FK constraint
     await db.execute(
         text("DELETE FROM run_scenario_results WHERE run_id = :rid"),
         {"rid": run_id},
@@ -638,7 +649,7 @@ async def delete_run(
 
 
 # ---------------------------------------------------------------------------
-# Update run label  (FIX: was missing entirely)
+# PATCH /api/runs/{run_id}/label
 # ---------------------------------------------------------------------------
 
 @app.patch("/api/runs/{run_id}/label", response_model=RunSummaryOut)
@@ -659,9 +670,7 @@ async def update_run_label(
     run.run_label = body.label
     await db.commit()
     await db.refresh(run)
-    mean_score = (
-        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
-    )
+    mean_score = sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
     return RunSummaryOut(
         id=run.id,
         project=run.project,
@@ -676,7 +685,7 @@ async def update_run_label(
 
 
 # ---------------------------------------------------------------------------
-# Rerun
+# POST /api/runs/{run_id}/rerun
 # ---------------------------------------------------------------------------
 
 @app.post("/api/runs/{run_id}/rerun", response_model=RunOut, status_code=201)
@@ -685,7 +694,6 @@ async def rerun_run(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Clone an existing run and re-execute it with the same configuration."""
     result = await db.execute(
         select(Run)
         .options(selectinload(Run.results))
@@ -722,10 +730,7 @@ async def rerun_run(
             scenarios_yaml = ds.yaml_content
 
     if not scenarios_yaml:
-        raise HTTPException(
-            status_code=400,
-            detail="Original run has no scenarios YAML — cannot rerun.",
-        )
+        raise HTTPException(status_code=400, detail="Original run has no scenarios YAML — cannot rerun.")
 
     try:
         scenarios_data = yaml.safe_load(scenarios_yaml)
@@ -738,53 +743,16 @@ async def rerun_run(
 
     new_run_id = str(uuid.uuid4())
     judge = judge_factory(original.model_name)
-    results: list[RunScenarioResult] = []
 
-    for scenario in scenarios:
-        scenario_id = scenario.get("id", str(uuid.uuid4()))
-        question = scenario.get("question", "")
-        context = scenario.get("context", "")
-        expected = scenario.get("expected_answer", "")
-
-        answer, latency_ms = await _get_llm_answer(
-            question=question,
-            context=context,
-            model_name=original.model_name,
-            app_endpoint_url=original.app_endpoint_url,
-        )
-
-        judge_result = await judge.judge(
-            question=question,
-            context=context,
-            answer=answer,
-            rubric=original.rubric or "",
-        )
-        score, reason = judge_result.score, judge_result.reason
-
-        rag_scores = None
-        if context and answer:
-            try:
-                rag_scores = await compute_rag_metrics(
-                    question=question,
-                    answer=answer,
-                    context=context,
-                    expected=expected,
-                )
-            except Exception:
-                rag_scores = None
-
-        results.append(
-            RunScenarioResult(
-                run_id=new_run_id,
-                scenario_id=scenario_id,
-                variant_id=original.variant_name,
-                score=score,
-                reason=reason,
-                latency_ms=latency_ms,
-                judge_model=original.model_name,
-                rag_scores=rag_scores,
-            )
-        )
+    results = await _run_scenarios(
+        scenarios=scenarios,
+        model_name=original.model_name,
+        rubric=original.rubric or "",
+        app_endpoint_url=original.app_endpoint_url,
+        run_id=new_run_id,
+        variant_name=original.variant_name,
+        judge=judge,
+    )
 
     mean_score = sum(r.score for r in results) / len(results) if results else 0.0
 
@@ -808,22 +776,6 @@ async def rerun_run(
     await db.commit()
     await db.refresh(new_run)
 
-    results_out = [
-        ScenarioResultOut(
-            scenario_id=r.scenario_id,
-            variant_id=r.variant_id,
-            score=r.score,
-            reason=r.reason,
-            latency_ms=r.latency_ms,
-            judge_model=r.judge_model,
-            faithfulness=(r.rag_scores or {}).get("faithfulness"),
-            answer_relevance=(r.rag_scores or {}).get("answer_relevance") or (r.rag_scores or {}).get("answer_relevancy"),
-            context_precision=(r.rag_scores or {}).get("context_precision"),
-            context_recall=(r.rag_scores or {}).get("context_recall"),
-        )
-        for r in results
-    ]
-
     return RunOut(
         id=new_run.id,
         project=new_run.project,
@@ -832,7 +784,7 @@ async def rerun_run(
         run_label=new_run.run_label,
         created_at=new_run.created_at,
         mean_score=round(mean_score, 4),
-        results=results_out,
+        results=[_make_scenario_result_out(r) for r in results],
         dataset_version_id=dataset_version_id,
         is_public=False,
     )
@@ -855,10 +807,7 @@ async def get_shared_run(
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found or not shared")
-
-    avg_score = (
-        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
-    )
+    avg_score = sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
     return ShareRunOut(
         run_id=run.id,
         project=run.project,
@@ -885,14 +834,10 @@ async def toggle_run_share(
     run = result.scalar_one_or_none()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-
     run.is_public = body.is_public
     await db.commit()
     await db.refresh(run)
-
-    mean_score = (
-        sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
-    )
+    mean_score = sum(r.score for r in run.results) / len(run.results) if run.results else 0.0
     return RunSummaryOut(
         id=run.id,
         project=run.project,
@@ -912,4 +857,4 @@ async def toggle_run_share(
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.6.0"}
+    return {"status": "ok", "version": "0.7.0"}
